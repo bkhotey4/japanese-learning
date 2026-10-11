@@ -61,6 +61,79 @@
     if (b) { e.preventDefault(); speak(b.dataset.speak, b.dataset.rate ? Number(b.dataset.rate) : undefined); }
   });
 
+  /* ---------------- 發音評分（瀏覽器語音辨識） ---------------- */
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  // alt：同一句的假名寫法，辨識結果是假名或漢字都能對得上
+  const micBtn = (text, alt = "") => SR
+    ? `<button class="btn small mic" data-mic="${esc(text)}" data-alt="${esc(alt)}" title="念出來，幫你打分數">🎤 跟讀評分</button>` : "";
+  const normJa = (s) => String(s || "")
+    .replace(/[（(][^）)]*[）)]/g, "")
+    .replace(/[\s、。，,.!！?？～〜「」『』【】・…ー\-*`]/g, "")
+    .replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));
+  function lcsMask(a, b) {
+    const dp = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+    for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--)
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    const hit = new Array(a.length).fill(false);
+    for (let i = 0, j = 0; i < a.length && j < b.length;) {
+      if (a[i] === b[j]) { hit[i] = true; i++; j++; } else if (dp[i + 1][j] >= dp[i][j + 1]) i++; else j++;
+    }
+    return { len: dp[0][0], hit };
+  }
+  function scoreSpeech(targets, heard) {
+    let best = { score: 0, target: targets[0], hit: [] };
+    for (const t of targets.filter(Boolean)) {
+      const a = normJa(t);
+      for (const h of heard) {
+        const b = normJa(h);
+        if (!a || !b) continue;
+        const { len, hit } = lcsMask(a, b);
+        const score = Math.round((len / a.length) * (len / b.length) * 100); // 念到的比例 × 沒多念的比例
+        if (score > best.score) best = { score, target: a, hit, heard: h };
+      }
+    }
+    return best;
+  }
+  let recog = null;
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-mic]");
+    if (!b) return;
+    e.preventDefault();
+    if (recog) { recog.abort(); recog = null; }
+    if ("speechSynthesis" in window) speechSynthesis.cancel();
+    const holder = b.closest(".row") || b.parentElement;
+    let out = holder.nextElementSibling;
+    if (!out || !out.classList.contains("mic-result")) { out = document.createElement("div"); out.className = "mic-result"; holder.after(out); }
+    out.innerHTML = `<div class="box small">🎙️ 正在聽…請念：<span class="jp">${esc(b.dataset.mic)}</span></div>`;
+    const label = b.textContent;
+    b.textContent = "🔴 錄音中…";
+    recog = new SR();
+    recog.lang = "ja-JP";
+    recog.maxAlternatives = 5;
+    recog.interimResults = false;
+    recog.onresult = (ev) => {
+      const heard = Array.from(ev.results[0]).map((r) => r.transcript);
+      const r = scoreSpeech([b.dataset.mic, b.dataset.alt], heard);
+      const grade = r.score >= 90 ? ["🌸 完美！", "ok"] : r.score >= 70 ? ["👍 很不錯！", "ok"] : r.score >= 40 ? ["💪 再試一次！", "bad"] : ["🤔 聽不太出來，慢慢念看看", "bad"];
+      const diff = [...r.target].map((c, i) => `<span style="color:var(${r.hit[i] ? "--ok" : "--bad"});font-weight:700">${esc(c)}</span>`).join("");
+      out.innerHTML = `<div class="feedback ${grade[1]}"><div class="spread"><b>${grade[0]}</b><b style="font-size:1.4rem">${r.score} 分</b></div>
+        <div class="small">目標：<span class="jp">${diff}</span>（紅字＝沒念到或念不清楚）</div>
+        <div class="small muted">聽到：${esc(r.heard || heard[0] || "")}</div></div>`;
+      P.micTries = (P.micTries || 0) + 1;
+      if (r.score > (P.micBest || 0)) P.micBest = r.score;
+      save();
+      activity();
+      if (r.score >= 80) unlock("badge_shadowing");
+    };
+    recog.onerror = (ev) => {
+      const msg = ev.error === "not-allowed" || ev.error === "service-not-allowed" ? "麥克風權限被拒絕，請在瀏覽器網址列允許使用麥克風。"
+        : ev.error === "no-speech" ? "沒有聽到聲音，請靠近麥克風再試一次。" : `語音辨識失敗（${ev.error}），建議使用 Chrome 或 Edge。`;
+      out.innerHTML = `<div class="feedback bad small">${msg}</div>`;
+    };
+    recog.onend = () => { b.textContent = label; recog = null; };
+    try { recog.start(); } catch { b.textContent = label; }
+  });
+
   /* ---------------- 學習進度（localStorage，取代 user_progress.json） ---------------- */
   const KEY = "jp_progress_v1";
   const blank = () => ({ level: 1, completed: [], streak: 0, lastDate: null, badges: [], mistakes: [], answered: 0, correct: 0 });
@@ -78,6 +151,8 @@
   function activity() {
     const t = todayStr();
     if (P.lastDate !== t) { P.streak += 1; P.lastDate = t; save(); }
+    P.days = P.days || [];
+    if (!P.days.includes(t)) { P.days.push(t); save(); }
     unlock("first_step");
     if (P.streak >= 3) unlock("badge_streak_3");
     if (P.streak >= 7) unlock("badge_streak_7");
@@ -135,12 +210,46 @@
 
   /* ---------------- 頁面 ---------------- */
   const NAV = [
-    ["", "🏠 首頁"], ["quest", "⚔️ 闖關"], ["kana", "🔤 五十音"], ["quiz", "🎯 測驗"],
+    ["", "🏠 首頁"], ["daily", "🗓️ 挑戰"], ["quest", "⚔️ 闖關"], ["kana", "🔤 五十音"], ["quiz", "🎯 測驗"],
     ["talk", "🍜 會話"], ["grammar", "🧩 文法"], ["speak", "🗣️ 跟讀"], ["travel", "✈️ 旅遊"],
     ["anime", "🎌 動漫"], ["songs", "🎐 童謡"], ["news", "📰 新聞"], ["plan", "📋 計畫"], ["me", "👑 我的"],
   ];
 
   const pages = {};
+
+  /* ---------------- 新手引導：依學習目標推薦路線 ---------------- */
+  const GOALS = {
+    travel: { icon: "✈️", name: "日本自由行", desc: "點餐、購物、問路、退稅", steps: [
+      ["quest/1", "⚔️ 第 1 關：これ、ください", "最萬用的點餐神句"], ["talk/ramen", "🍜 拉麵店角色扮演", "實際走一遍點餐流程"], ["travel/sos", "🚨 SOS 手指卡", "出發前一定要存"]] },
+    anime: { icon: "🎌", name: "看懂動漫日劇", desc: "聽懂台詞、不靠字幕", steps: [
+      ["anime", "🎌 動漫名台詞教室", "鬼滅、咒術、柯南…"], ["kana/game", "🎮 五十音消除遊戲", "先把假名練成反射"], ["talk/anime", "💬 動漫常用口語", "すごい、やばい、まじで"]] },
+    life: { icon: "🏠", name: "日本生活", desc: "超商、看醫生、租屋", steps: [
+      ["talk/daily", "🏠 日常生活會話", "每天都用得到"], ["talk/convenience", "🏪 超商結帳角色扮演", "要加熱嗎？要袋子嗎？"], ["travel/culture", "🛡️ 文化避坑指南", "居酒屋、電車、溫泉禮儀"]] },
+    work: { icon: "💼", name: "職場工作", desc: "敬語、商務應對", steps: [
+      ["talk/work", "💼 職場敬語入門", "かしこまりました"], ["grammar", "🧩 動詞變化", "て形口訣歌一次搞懂"], ["news", "📰 NHK 簡易新聞", "練商務閱讀"]] },
+  };
+  function onboardingHTML() {
+    return `<div class="card hero">
+      <h1>歡迎來到日語學習道場 🌸</h1>
+      <p>完全免費、不用註冊，每天 15 分鐘，從五十音學到日本自由行。<br><b>你學日語最想做到什麼？</b></p>
+      <div class="options">${Object.entries(GOALS).map(([k, g]) => `
+        <button class="option" data-goal="${k}"><span style="font-size:1.5rem">${g.icon}</span> <b>${g.name}</b><br><span class="small muted">${g.desc}</span></button>`).join("")}</div>
+      <p class="small muted" style="margin:0">或直接 <a href="#/daily">▶ 玩今天的 3 分鐘挑戰</a></p></div>`;
+  }
+  function goalPathHTML() {
+    const g = GOALS[P.goal];
+    return `<div class="card"><div class="spread"><h2>🧭 你的專屬路線：${g.icon} ${g.name}</h2><button class="btn small" data-goal="">換目標</button></div>
+      <div class="grid" style="margin-top:8px">${g.steps.map(([h, t, d], i) => `
+        <a class="card link" href="#/${h}" style="box-shadow:none"><div class="small muted">STEP ${i + 1}</div><b>${t}</b><div class="small muted">${d}</div></a>`).join("")}</div></div>`;
+  }
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-goal]");
+    if (!b) return;
+    P.goal = b.dataset.goal || null;
+    save();
+    if (P.goal) toast(`${GOALS[P.goal].icon} 已為你規劃「${GOALS[P.goal].name}」路線！`);
+    route();
+  });
 
   // ===== 首頁（/hub + /daily + /omikuji） =====
   pages[""] = () => {
@@ -149,10 +258,16 @@
     const daily = allPhrases[dayIndex() % allPhrases.length];
     const trivia = D.trivia[dayIndex() % D.trivia.length];
     const next = D.quests[String(P.level)];
+    const done = (P.dailyResults || {})[todayStr()];
     $app.innerHTML = `
-      <h1>おかえりなさい！🌸</h1>
-      <p class="lead">每天 15 分鐘，從五十音到日本自由行、生活與職場。進度存在這台裝置的瀏覽器裡。</p>
-      <div class="grid">
+      ${P.goal ? `<h1>おかえりなさい！🌸</h1>
+      <p class="lead">每天 15 分鐘，從五十音到日本自由行、生活與職場。進度存在這台裝置的瀏覽器裡。</p>` : onboardingHTML()}
+      <a class="card link daily-cta" href="#/daily" style="margin:16px 0">
+        <div class="spread"><div><h2 style="margin:0">🗓️ 今日挑戰 ${todayStr().slice(5).replace("-", "/")}</h2>
+          <div class="small muted">全站同一組 5 題・3 分鐘・做完可以分享成績</div></div>
+          <span class="btn ${done ? "" : "primary"}">${done ? `${done.marks} ${done.score}/5` : "開始挑戰 ➡️"}</span></div></a>
+      ${P.goal ? goalPathHTML() : ""}
+      <div class="grid" style="margin-top:16px">
         <div class="card">
           <div class="spread"><h2>✨ 今日一句</h2><span class="small muted">${esc(daily.cat)}</span></div>
           <div class="jp-big">${esc(daily.japanese)}</div>
@@ -160,7 +275,7 @@
           <div class="romaji">${esc(daily.romaji)}</div>
           <p><b>${esc(daily.meaning)}</b></p>
           <div class="small muted md">${md(daily.usage)}</div>
-          <div class="row" style="margin-top:10px">${speakBtn(daily.japanese, "🔊 聽發音")}</div>
+          <div class="row" style="margin-top:10px">${speakBtn(daily.japanese, "🔊 聽發音")}${micBtn(daily.japanese, daily.furigana)}</div>
         </div>
         <div class="card">
           <h2>⚔️ 繼續闖關</h2>
@@ -204,6 +319,103 @@
         </div>`;
     });
   };
+
+  // ===== 每日挑戰：同一天全站同一組題目，可分享成績 =====
+  const SITE_URL = "https://bkhotey4.github.io/japanese-learning/";
+  function seededRandom(seedStr) {
+    let h = 1779033703 ^ seedStr.length;
+    for (let i = 0; i < seedStr.length; i++) { h = Math.imul(h ^ seedStr.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); }
+    return () => { h = Math.imul(h ^ (h >>> 16), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909); return ((h ^= h >>> 16) >>> 0) / 4294967296; };
+  }
+  function dailyQuestions(date) {
+    const rnd = seededRandom("jp-daily-" + date);
+    const pickR = (a) => a[Math.floor(rnd() * a.length)];
+    const sample = (a, n) => { const c = a.slice(), out = []; while (out.length < n && c.length) out.push(c.splice(Math.floor(rnd() * c.length), 1)[0]); return out; };
+    const kanaQ = () => {
+      const c = pickR(D.kanaCards);
+      const toKata = rnd() < 0.5;
+      const field = toKata ? "kata" : "romaji";
+      const pool = [...new Set(D.kanaCards.map((x) => x[field]).filter((v) => v !== c[field]))];
+      return { question: `### 『 ${c.hira} 』的${toKata ? "片假名" : "羅馬拼音"}是？`, options: [c[field], ...sample(pool, 3)], answer: c[field], explanation: `🧠 ${c.mnemonic}`, kana: true };
+    };
+    const quests = Object.values(D.quests).map((q) => q.quiz);
+    const katakana = D.katakanaQuizzes;
+    return [kanaQ(), ...sample(D.quiz, 2), pickR(quests), pickR(katakana)];
+  }
+  function dailyStreak() {
+    const r = P.dailyResults || {};
+    let n = 0;
+    const d = new Date();
+    if (!r[todayStr()]) d.setDate(d.getDate() - 1); // 今天還沒做，不算斷
+    for (;;) {
+      const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      if (!r[k]) return n;
+      n++; d.setDate(d.getDate() - 1);
+    }
+  }
+  function heatmapHTML() {
+    const days = new Set([...(P.days || []), ...Object.keys(P.dailyResults || {})]);
+    const cells = [];
+    const d = new Date(); d.setDate(d.getDate() - 34);
+    for (let i = 0; i < 35; i++) {
+      const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const res = (P.dailyResults || {})[k];
+      const lvl = res ? (res.score >= 4 ? 3 : 2) : days.has(k) ? 1 : 0;
+      cells.push(`<div class="heat l${lvl}" title="${k}${res ? ` 挑戰 ${res.score}/5` : days.has(k) ? " 有學習" : ""}"></div>`);
+      d.setDate(d.getDate() + 1);
+    }
+    return `<div class="heatmap">${cells.join("")}</div><div class="small muted" style="margin-top:6px">最近 5 週：淺色＝有學習，深色＝完成每日挑戰</div>`;
+  }
+  pages.daily = () => {
+    const date = todayStr();
+    P.dailyResults = P.dailyResults || {};
+    const done = P.dailyResults[date];
+    $app.innerHTML = `<h1>🗓️ 今日挑戰</h1><p class="lead">${date.replace(/-/g, "/")}・全站同一組 5 題，每天只能挑戰一次，做完把成績分享給朋友！</p>
+      <div class="card" id="dc" style="max-width:760px"></div>
+      <div class="card" style="max-width:760px;margin-top:14px"><div class="spread"><h2>📅 學習紀錄</h2><span>🔥 連續挑戰 <b>${dailyStreak()}</b> 天</span></div>${heatmapHTML()}</div>`;
+    const el = document.getElementById("dc");
+    if (done) return showDailyResult(el, date, done);
+    const qs = dailyQuestions(date);
+    const marks = [];
+    let i = 0;
+    const next = () => {
+      if (i >= qs.length) {
+        const score = marks.filter((m) => m === "⭕").length;
+        P.dailyResults[date] = { score, marks: marks.join("") };
+        save();
+        activity();
+        unlock("badge_quiz");
+        return pages.daily();
+      }
+      const q = qs[i++];
+      mountQuiz(el, q, {
+        trackMistake: !q.kana,
+        onDone: (ok) => marks.push(ok ? "⭕" : "❌"),
+        onNext: next,
+        nextLabel: i === qs.length ? "看結果 🎉" : "下一題 ➡️",
+      });
+      el.insertAdjacentHTML("afterbegin", `<div class="spread small muted"><span>第 ${i} / ${qs.length} 題</span><span>${marks.join("")}</span></div>
+        <div class="progress" style="margin:6px 0 12px"><div style="width:${((i - 1) / qs.length) * 100}%"></div></div>`);
+    };
+    next();
+  };
+  function showDailyResult(el, date, r) {
+    const msg = r.score === 5 ? "🌸 全對！太強了！" : r.score >= 4 ? "👏 很棒！差一點就全對" : r.score >= 2 ? "💪 不錯，明天再來！" : "🌱 每天一點點，明天一定更好！";
+    const text = `🌸 日語學習道場 每日挑戰 ${date.slice(5).replace("-", "/")}\n${r.marks} ${r.score}/5\n🔥 連續挑戰 ${dailyStreak()} 天\n一起來學日語 👉 ${SITE_URL}#/daily`;
+    el.innerHTML = `<div style="text-align:center"><div style="font-size:2.4rem;letter-spacing:4px">${r.marks}</div>
+        <div class="jp-big">${r.score} / 5</div><p><b>${msg}</b></p>
+        <pre class="share-text">${esc(text)}</pre>
+        <div class="row" style="justify-content:center"><button class="btn primary" id="shareBtn">📤 分享成績</button>
+        <a class="btn" href="#/review">🔄 複習錯題</a><a class="btn" href="#/quest">⚔️ 繼續闖關</a></div>
+        <p class="small muted">明天 00:00 會有新的題目 ⏰</p></div>`;
+    document.getElementById("shareBtn").addEventListener("click", async () => {
+      try {
+        if (navigator.share) { await navigator.share({ text }); return; }
+        await navigator.clipboard.writeText(text);
+        toast("✅ 已複製成績，貼到 LINE、IG 或 Threads 吧！");
+      } catch (e) { if (e && e.name !== "AbortError") toast("請手動複製上方文字分享"); }
+    });
+  }
 
   // ===== 闖關（/quest） =====
   pages.quest = (arg) => {
@@ -249,7 +461,7 @@
             <div class="romaji">${esc(q.romaji)}</div>
             <div class="small">${esc(q.phonetic)}</div>
             <p><b>${esc(q.meaning)}</b></p>
-            <div class="row">${speakBtn(q.phrase, "🔊 正常")}<button class="btn small speak" data-speak="${esc(q.phrase)}" data-rate="0.55">🐢 慢速</button></div>
+            <div class="row">${speakBtn(q.phrase, "🔊 正常")}<button class="btn small speak" data-speak="${esc(q.phrase)}" data-rate="0.55">🐢 慢速</button>${micBtn(q.phrase)}</div>
           </div>
           <div class="box"><b>📍 使用情境</b><div class="md small">${md(q.scenario)}</div></div>
           <div class="box gold md small">${md(q.mnemonic_story)}</div>
@@ -430,7 +642,7 @@
       body = `<p class="muted">${esc(s.description)}</p><div class="grid">${s.phrases.map((p) => `
         <div class="card"><div class="spread"><span class="jp" style="font-size:1.2rem">${esc(p.japanese)}</span>${speakBtn(p.japanese)}</div>
         <div class="furi">${esc(p.furigana)}</div><div class="romaji">${esc(p.romaji)}</div>
-        <p><b>${esc(p.meaning)}</b></p><div class="small muted md">${md(p.usage)}</div></div>`).join("")}</div>`;
+        <p><b>${esc(p.meaning)}</b></p><div class="small muted md">${md(p.usage)}</div>${SR ? `<div class="row" style="margin-top:8px">${micBtn(p.japanese, p.furigana)}</div>` : ""}</div>`).join("")}</div>`;
     }
     $app.innerHTML = `<h1>🍜 情境會話</h1><p class="lead">先學句子，再到角色扮演實戰。</p>
       <div class="row" style="margin-bottom:14px">${tabs.map(([k, t]) => `<a class="chip ${k === tab ? "active" : ""}" href="#/talk/${k}">${esc(t)}</a>`).join("")}</div>${body}`;
@@ -480,12 +692,12 @@
   // ===== 跟讀（/voice + /shadowing） =====
   pages.speak = () => {
     const rate = Number(localStorage.getItem("jp_rate") || 0.8);
-    $app.innerHTML = `<h1>🗣️ 發音與跟讀</h1><p class="lead">使用瀏覽器內建日語語音。電腦建議用 Edge / Chrome（有 Nanami 等自然語音）。</p>
+    $app.innerHTML = `<h1>🗣️ 發音與跟讀</h1><p class="lead">先聽 🔊，再按 🎤 念一次，網站會幫你的發音打分數。建議用 Chrome / Edge${SR ? "" : "（你目前的瀏覽器不支援語音辨識，所以看不到 🎤 按鈕）"}。</p>
       <div class="card" style="margin-bottom:16px">
         <h2>🔊 日文發音機</h2>
         <textarea id="ttsText" placeholder="輸入任何日文，例如：すみません、駅はどこですか？">すみません、駅はどこですか？</textarea>
         <div class="row" style="margin-top:10px">
-          <button class="btn primary" id="ttsGo">▶ 朗讀</button>
+          <button class="btn primary" id="ttsGo">▶ 朗讀</button>${SR ? `<button class="btn" id="ttsMic">🎤 念念看評分</button>` : ""}
           <label class="small">語速 <input type="range" id="rate" min="0.4" max="1.3" step="0.05" value="${rate}"> <span id="rateVal">${rate}</span></label>
         </div>
         <p class="small muted" id="voiceInfo"></p>
@@ -497,11 +709,13 @@
         <div class="jp" style="font-size:1.2rem">${esc(s.sentence)}</div>
         <div class="furi">${esc(s.furigana)}</div><div class="romaji">${esc(s.romaji)}</div>
         <p><b>${esc(s.meaning)}</b></p><div class="small md box">${md(s.pitch_tip)}</div>
-        <div class="row" style="margin-top:10px">${speakBtn(s.sentence, "🔊 正常")}<button class="btn small speak" data-speak="${esc(s.sentence)}" data-rate="0.55">🐢 慢速</button></div></div>`).join("")}</div>`;
+        <div class="row" style="margin-top:10px">${speakBtn(s.sentence, "🔊 正常")}<button class="btn small speak" data-speak="${esc(s.sentence)}" data-rate="0.55">🐢 慢速</button>${micBtn(s.sentence, s.furigana)}</div></div>`).join("")}</div>`;
     unlock("badge_shadowing");
     const info = () => { const el = document.getElementById("voiceInfo"); if (el) el.textContent = jaVoice ? `使用語音：${jaVoice.name}` : "⚠️ 找不到日語語音，請在系統安裝日語語音套件，或改用 Edge / Chrome。"; };
     info(); setTimeout(info, 800);
     document.getElementById("ttsGo").addEventListener("click", () => { activity(); speak(document.getElementById("ttsText").value); });
+    const tm = document.getElementById("ttsMic");
+    if (tm) tm.addEventListener("click", () => { tm.dataset.mic = document.getElementById("ttsText").value; });
     const r = document.getElementById("rate");
     r.addEventListener("input", () => { document.getElementById("rateVal").textContent = r.value; try { localStorage.setItem("jp_rate", r.value); } catch {} });
   };
@@ -562,7 +776,7 @@
         <div class="jp" style="font-size:1.3rem;margin-top:6px">${esc(a.quote)}</div>
         <div class="furi">${esc(a.furigana)}</div><div class="romaji">${esc(a.romaji)}</div><div class="small">${esc(a.phonetic)}</div>
         <p><b>${esc(a.meaning)}</b></p>
-        <div class="row">${speakBtn(a.quote, "🔊 正常")}<button class="btn small speak" data-speak="${esc(a.quote)}" data-rate="0.55">🐢 慢速</button></div>
+        <div class="row">${speakBtn(a.quote, "🔊 正常")}<button class="btn small speak" data-speak="${esc(a.quote)}" data-rate="0.55">🐢 慢速</button>${micBtn(a.quote, a.furigana)}</div>
         <details style="margin-top:8px"><summary class="small">📖 場景與文法解析</summary>
           <p class="small">${md(a.scene)}</p>
           <div class="small box md">${md(Array.isArray(a.grammar_breakdown) ? a.grammar_breakdown.join("\n") : a.grammar_breakdown)}</div>
@@ -663,9 +877,11 @@
     const acc = P.answered ? Math.round((P.correct / P.answered) * 100) : 0;
     $app.innerHTML = `<h1>👑 我的學習檔案</h1>
       <div class="grid tight" style="margin-bottom:16px">
-        ${[["🔥", P.streak, "累積學習天數"], ["⚔️", `${P.completed.length}/20`, "已通關"], ["🎯", `${acc}%`, `答題正確率 (${P.answered} 題)`], ["🔄", P.mistakes.length, "待複習錯題"]]
+        ${[["🔥", P.streak, "累積學習天數"], ["⚔️", `${P.completed.length}/20`, "已通關"], ["🎯", `${acc}%`, `答題正確率 (${P.answered} 題)`], ["🔄", P.mistakes.length, "待複習錯題"], ["🗓️", dailyStreak(), "連續每日挑戰"], ["🎤", P.micBest ? `${P.micBest} 分` : "—", `最佳發音 (${P.micTries || 0} 次)`]]
           .map(([e, v, t]) => `<div class="card"><div class="emoji">${e}</div><div style="font-size:1.6rem;font-weight:700">${v}</div><div class="small muted">${t}</div></div>`).join("")}
       </div>
+      <div class="card" style="margin-bottom:16px"><div class="spread"><h2>📅 學習紀錄</h2>
+        ${P.goal ? `<span class="small">目標：${GOALS[P.goal].icon} ${GOALS[P.goal].name} <button class="btn small" data-goal="">更換</button></span>` : `<a class="btn small" href="#/">🧭 選擇學習目標</a>`}</div>${heatmapHTML()}</div>
       <h2>🎖️ 成就勳章 (${P.badges.length}/${Object.keys(D.badges).length})</h2>
       <div class="grid tight">${Object.entries(D.badges).map(([k, b]) => `
         <div class="card badge-tile ${P.badges.includes(k) ? "" : "locked"}"><div style="font-size:1.05rem"><b>${esc(b.name)}</b></div><div class="small muted">${esc(b.desc)}</div></div>`).join("")}</div>
@@ -711,4 +927,9 @@
 
   renderStat();
   route();
+
+  // 可安裝成 App、離線可用（本機預覽時不啟用，避免快取干擾開發）
+  if ("serviceWorker" in navigator && !/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  }
 })();

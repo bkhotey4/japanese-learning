@@ -1,0 +1,21 @@
+{
+  "name": "日語學習道場",
+  "short_name": "日語道場",
+  "description": "每天 15 分鐘，從五十音學到日本自由行：闖關、每日挑戰、發音評分、角色扮演。",
+  "lang": "zh-TW",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#fdf7f8",
+  "theme_color": "#d6456b",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "今日挑戰", "url": "./#/daily" },
+    { "name": "五十音遊戲", "url": "./#/kana/game" },
+    { "name": "SOS 手指卡", "url": "./#/travel/sos" }
+  ]
+}

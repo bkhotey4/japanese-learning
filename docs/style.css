@@ -217,3 +217,19 @@ textarea { min-height: 90px; resize: vertical; font-family: var(--jp); }
   .stat-pill { display: none; }
   .bubble { max-width: 95%; }
 }
+
+/* ---------- 新手引導 / 每日挑戰 / 發音評分 ---------- */
+.hero { background: linear-gradient(135deg, var(--accent-soft), var(--surface) 70%); }
+.hero h1 { font-size: 1.5rem; }
+.daily-cta { border: 1.5px solid var(--accent); }
+.share-text {
+  background: var(--surface-2); border-radius: 10px; padding: 12px; text-align: left;
+  white-space: pre-wrap; word-break: break-all; font-family: inherit; font-size: .9rem; margin: 12px auto; max-width: 420px;
+}
+.heatmap { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; max-width: 280px; }
+.heat { aspect-ratio: 1; border-radius: 4px; background: var(--surface-2); }
+.heat.l1 { background: color-mix(in srgb, var(--accent) 30%, var(--surface-2)); }
+.heat.l2 { background: color-mix(in srgb, var(--accent) 65%, var(--surface-2)); }
+.heat.l3 { background: var(--accent); }
+.mic-result { margin-top: 8px; }
+.btn.mic { border-color: var(--accent); color: var(--accent); }
