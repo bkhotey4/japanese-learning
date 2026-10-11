@@ -210,7 +210,7 @@
 
   /* ---------------- 頁面 ---------------- */
   const NAV = [
-    ["", "🏠 首頁"], ["daily", "🗓️ 挑戰"], ["quest", "⚔️ 闖關"], ["kana", "🔤 五十音"], ["quiz", "🎯 測驗"],
+    ["", "🏠 首頁"], ["daily", "🗓️ 挑戰"], ["cards", "🃏 單字卡"], ["quest", "⚔️ 闖關"], ["kana", "🔤 五十音"], ["quiz", "🎯 測驗"],
     ["talk", "🍜 會話"], ["grammar", "🧩 文法"], ["speak", "🗣️ 跟讀"], ["travel", "✈️ 旅遊"],
     ["anime", "🎌 動漫"], ["songs", "🎐 童謡"], ["news", "📰 新聞"], ["plan", "📋 計畫"], ["me", "👑 我的"],
   ];
@@ -266,6 +266,9 @@
         <div class="spread"><div><h2 style="margin:0">🗓️ 今日挑戰 ${todayStr().slice(5).replace("-", "/")}</h2>
           <div class="small muted">全站同一組 5 題・3 分鐘・做完可以分享成績</div></div>
           <span class="btn ${done ? "" : "primary"}">${done ? `${done.marks} ${done.score}/5` : "開始挑戰 ➡️"}</span></div></a>
+      ${(() => { const n = dueCount(); return `<a class="card link" href="#/cards${n ? "/study" : ""}" style="margin-bottom:16px">
+        <div class="spread"><div><h2 style="margin:0">🃏 單字卡複習</h2><div class="small muted">${n ? `今天有 ${n} 張要練，大約 ${Math.max(1, Math.round(n * 0.15))} 分鐘` : "今天的卡片都練完了 🎉"}</div></div>
+        <span class="btn ${n ? "primary" : ""}">${n ? "開始 ➡️" : "查看牌組"}</span></div></a>`; })()}
       ${P.goal ? goalPathHTML() : ""}
       <div class="grid" style="margin-top:16px">
         <div class="card">
@@ -596,6 +599,159 @@
     };
     next();
   };
+  /* ---------------- 單字卡：間隔重複複習（簡化版 SM-2，類似 Anki） ---------------- */
+  const addDays = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+  const DECKS = {
+    kana: { name: "🔤 五十音", build: () => D.kanaCards.map((c) => ({ id: "kana:" + c.hira, front: c.hira, reading: `${c.romaji}・片假名 ${c.kata}`, back: c.romaji, extra: `🧠 ${c.mnemonic}`, say: c.hira })) },
+    quest: { name: "⚔️ 闖關句子", build: () => Object.values(D.quests).map((q) => ({ id: "quest:" + q.level, front: q.phrase, reading: q.romaji, back: q.meaning, extra: q.scenario, say: q.phrase })) },
+    phrase: { name: "🍜 情境會話", build: () => Object.values(D.scenarios).flatMap((s) => s.phrases.map((p) => ({ id: "phrase:" + p.japanese, front: p.japanese, reading: `${p.furigana}｜${p.romaji}`, back: p.meaning, extra: p.usage, say: p.japanese }))) },
+    katakana: { name: "🧩 片假名外來語", build: () => D.katakanaWords.map((w) => ({ id: "kata:" + w.word, front: w.word, reading: w.romaji, back: w.meaning, extra: `${w.origin}｜${w.note}`, say: w.word })) },
+    travel: { name: "✈️ 旅遊單字", build: () => [
+      ...Object.values(D.menu).flatMap((m) => m.items.map((i) => ({ id: "menu:" + i.japanese, front: i.japanese.replace(/\s*\(.*\)$/, ""), reading: i.furigana, back: i.meaning, extra: i.detail, say: i.furigana }))),
+      ...Object.values(D.scan).flatMap((s) => s.items.map((i) => ({ id: "scan:" + i.jp, front: i.jp, reading: `${i.furigana}｜${i.romaji}`, back: i.meaning, extra: i.tip, say: i.furigana }))),
+      ...Object.entries(D.signs).map(([k, v]) => ({ id: "sign:" + k, front: k, reading: `${v.furigana}｜${v.romaji}`, back: v.meaning, extra: v.tip, say: v.furigana })),
+    ] },
+    words: { name: "📖 新聞・童謡單字", build: () => [
+      ...D.news.flatMap((n) => n.vocabulary.map((v) => ({ id: "news:" + v.word, front: v.word, reading: "", back: v.meaning, extra: `📰 ${n.title}`, say: v.word.split(/[ (（]/)[0] }))),
+      ...Object.values(D.doyo).flatMap((s) => s.vocab.map((v) => ({ id: "doyo:" + v.word, front: v.word, reading: v.reading, back: v.meaning, extra: `🎐 ${s.title}`, say: v.word }))),
+    ] },
+  };
+  let _allCards = null;
+  const allCards = () => _allCards || (_allCards = Object.entries(DECKS).flatMap(([deck, d]) => d.build().map((c) => ({ ...c, deck }))));
+  const srsState = (id) => (P.srs || {})[id];
+  const srsSettings = () => Object.assign({ newPerDay: 10, decks: ["kana", "quest", "phrase"] }, P.srsSettings || {});
+  function newLeftToday() {
+    const t = todayStr();
+    const used = P.srsNew && P.srsNew.date === t ? P.srsNew.count : 0;
+    return Math.max(0, srsSettings().newPerDay - used);
+  }
+  function srsQueue() {
+    const t = todayStr(), set = srsSettings();
+    const cards = allCards().filter((c) => set.decks.includes(c.deck));
+    const due = cards.filter((c) => { const s = srsState(c.id); return s && s.due <= t; }).sort((a, b) => srsState(a.id).due.localeCompare(srsState(b.id).due));
+    const fresh = cards.filter((c) => !srsState(c.id)).slice(0, newLeftToday());
+    return { due, fresh };
+  }
+  // 依評分算下次間隔（天）。0=忘記 1=困難 2=記得 3=簡單
+  function nextInterval(s, g) {
+    s = s || { iv: 0, ease: 2.5, reps: 0 };
+    if (g === 0) return 0;
+    if (g === 1) return Math.max(1, Math.round(s.iv * 1.2));
+    if (g === 2) return s.reps === 0 ? 1 : s.reps === 1 ? 3 : Math.round(Math.max(s.iv, 1) * s.ease);
+    return s.reps === 0 ? 4 : Math.round(Math.max(s.iv, 1) * s.ease * 1.3);
+  }
+  function rateCard(c, g) {
+    P.srs = P.srs || {};
+    const old = P.srs[c.id];
+    if (!old) { const t = todayStr(); P.srsNew = { date: t, count: (P.srsNew && P.srsNew.date === t ? P.srsNew.count : 0) + 1 }; }
+    const s = Object.assign({ iv: 0, ease: 2.5, reps: 0, lapses: 0 }, old);
+    const iv = nextInterval(s, g);
+    if (g === 0) { s.reps = 0; s.lapses += 1; s.ease = Math.max(1.3, s.ease - 0.2); }
+    else { s.reps += 1; if (g === 1) s.ease = Math.max(1.3, s.ease - 0.15); if (g === 3) s.ease += 0.15; }
+    s.iv = iv;
+    s.due = addDays(iv);
+    P.srs[c.id] = s;
+    P.srsReviews = (P.srsReviews || 0) + 1;
+    save();
+  }
+  const ivLabel = (n) => (n === 0 ? "<1 分" : n < 30 ? `${n} 天` : n < 365 ? `${Math.round(n / 30)} 個月` : `${(n / 365).toFixed(1)} 年`);
+  function dueCount() { const q = srsQueue(); return q.due.length + q.fresh.length; }
+
+  pages.cards = (arg) => {
+    if (arg === "study") return cardStudy();
+    const set = srsSettings(), t = todayStr();
+    const q = srsQueue();
+    const rows = Object.entries(DECKS).map(([k, d]) => {
+      const cs = allCards().filter((c) => c.deck === k);
+      const learned = cs.filter((c) => srsState(c.id)).length;
+      const due = cs.filter((c) => { const s = srsState(c.id); return s && s.due <= t; }).length;
+      const mature = cs.filter((c) => { const s = srsState(c.id); return s && s.iv >= 21; }).length;
+      return `<tr><td><label><input type="checkbox" data-deck="${k}" ${set.decks.includes(k) ? "checked" : ""}> ${d.name}</label></td>
+        <td>${cs.length}</td><td>${learned}</td><td>${mature}</td><td><b>${due}</b></td></tr>`;
+    }).join("");
+    $app.innerHTML = `<h1>🃏 單字卡</h1>
+      <p class="lead">間隔重複複習：記得的卡片會越隔越久才出現，忘記的會馬上再考。每天清空待複習，記憶最牢。</p>
+      <div class="card" style="max-width:760px">
+        <div class="spread"><div><div style="font-size:2rem;font-weight:700">${q.due.length + q.fresh.length}</div>
+          <div class="small muted">今天要練：複習 ${q.due.length} 張・新卡 ${q.fresh.length} 張</div></div>
+          ${q.due.length + q.fresh.length ? `<a class="btn primary" href="#/cards/study">▶ 開始複習</a>` : `<span class="btn">🎉 今天完成了！</span>`}</div>
+      </div>
+      <div class="card" style="max-width:760px;margin-top:14px">
+        <h2>📚 牌組</h2><p class="small muted">勾選要練習的牌組。「熟記」＝間隔超過 21 天。</p>
+        <div class="table-wrap"><table class="small"><tr><th>牌組</th><th>總數</th><th>學過</th><th>熟記</th><th>待複習</th></tr>${rows}</table></div>
+        <div class="row" style="margin-top:12px"><label class="small">每天新卡數量
+          <select id="newPerDay" style="width:auto;display:inline-block;margin-left:6px">${[5, 10, 15, 20, 30].map((n) => `<option ${n === set.newPerDay ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+          <span class="small muted">今天還可學 ${newLeftToday()} 張新卡</span></div>
+      </div>`;
+    const saveSet = (patch) => { P.srsSettings = Object.assign(srsSettings(), patch); save(); route(); };
+    document.querySelectorAll("[data-deck]").forEach((cb) => cb.addEventListener("change", () => {
+      saveSet({ decks: [...document.querySelectorAll("[data-deck]:checked")].map((x) => x.dataset.deck) });
+    }));
+    document.getElementById("newPerDay").addEventListener("change", (e) => saveSet({ newPerDay: Number(e.target.value) }));
+  };
+  function cardStudy() {
+    const q = srsQueue();
+    // 複習卡與新卡穿插，忘記的卡放回佇列尾端再考一次
+    const queue = [];
+    const due = q.due.slice(), fresh = q.fresh.slice();
+    while (due.length || fresh.length) { if (due.length) queue.push(due.shift()); if (due.length) queue.push(due.shift()); if (fresh.length) queue.push(fresh.shift()); }
+    const total = queue.length;
+    let doneN = 0;
+    $app.innerHTML = `<p><a href="#/cards">← 單字卡</a></p><div class="card flashcard" id="fc" style="max-width:640px;margin:0 auto"></div>
+      <p class="small muted" style="text-align:center">⌨️ 空白鍵翻面・1 忘記・2 困難・3 記得・4 簡單</p>`;
+    const el = document.getElementById("fc");
+    let cur = null, flipped = false;
+    const show = () => {
+      cur = queue.shift();
+      flipped = false;
+      if (!cur) {
+        activity();
+        el.innerHTML = `<div style="text-align:center"><div style="font-size:3rem">🎉</div><h2>今天的單字卡完成了！</h2>
+          <p class="muted">練了 ${doneN} 次，明天再來。</p><a class="btn primary" href="#/cards">回單字卡</a></div>`;
+        return;
+      }
+      const isNew = !srsState(cur.id);
+      el.innerHTML = `<div class="spread small muted"><span>${DECKS[cur.deck].name}${isNew ? "・🆕 新卡" : ""}</span><span>剩 ${queue.length + 1} 張</span></div>
+        <div class="progress" style="margin:6px 0 18px"><div style="width:${total ? (doneN / (doneN + queue.length + 1)) * 100 : 0}%"></div></div>
+        <div style="text-align:center;min-height:150px">
+          <div class="${cur.front.length <= 2 ? "jp-huge" : "jp-big"}">${esc(cur.front)}</div>
+          <div class="row" style="justify-content:center;margin-top:8px">${speakBtn(cur.say)}${micBtn(cur.say, cur.reading.split("｜")[0])}</div>
+          <div id="ans"></div>
+        </div>
+        <div id="act" style="margin-top:16px"><button class="btn primary" id="flip" style="width:100%">顯示答案（空白鍵）</button></div>`;
+      document.getElementById("flip").addEventListener("click", flip);
+      if (localStorage.getItem("jp_autospeak") !== "0") speak(cur.say);
+    };
+    const flip = () => {
+      if (!cur || flipped) return;
+      flipped = true;
+      const s = srsState(cur.id);
+      document.getElementById("ans").innerHTML = `<hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+        ${cur.reading ? `<div class="furi">${esc(cur.reading)}</div>` : ""}
+        <div style="font-size:1.2rem;margin:6px 0"><b>${esc(cur.back)}</b></div>
+        ${cur.extra ? `<div class="small muted md">${md(cur.extra)}</div>` : ""}`;
+      const labels = [["忘記", "bad"], ["困難", ""], ["記得", "ok"], ["簡單", "ok"]];
+      document.getElementById("act").innerHTML = `<div class="options" style="grid-template-columns:repeat(4,1fr)">${labels.map(([t], g) => `
+        <button class="option" data-g="${g}" style="text-align:center"><b>${t}</b><br><span class="small muted">${ivLabel(nextInterval(s, g))}</span></button>`).join("")}</div>`;
+      document.querySelectorAll("[data-g]").forEach((b) => b.addEventListener("click", () => rate(Number(b.dataset.g))));
+    };
+    const rate = (g) => {
+      if (!cur || !flipped) return;
+      rateCard(cur, g);
+      doneN++;
+      if (g === 0) queue.splice(Math.min(queue.length, 3), 0, cur); // 忘記：幾張後再出現
+      show();
+    };
+    const onKey = (e) => {
+      if (!document.getElementById("fc")) { document.removeEventListener("keydown", onKey); return; }
+      if (e.target.closest && e.target.closest("input, textarea, select, button")) return;
+      if (e.code === "Space" || e.key === "Enter") { e.preventDefault(); flipped ? rate(2) : flip(); }
+      else if (/^[1-4]$/.test(e.key)) rate(Number(e.key) - 1);
+    };
+    document.addEventListener("keydown", onKey);
+    show();
+  }
+
   pages.review = () => {
     $app.innerHTML = `<h1>🔄 錯題本</h1><p class="lead">答對就從錯題本移除，全部清空就是你的勝利！</p><div id="rv"></div>`;
     const el = document.getElementById("rv");
@@ -877,7 +1033,7 @@
     const acc = P.answered ? Math.round((P.correct / P.answered) * 100) : 0;
     $app.innerHTML = `<h1>👑 我的學習檔案</h1>
       <div class="grid tight" style="margin-bottom:16px">
-        ${[["🔥", P.streak, "累積學習天數"], ["⚔️", `${P.completed.length}/20`, "已通關"], ["🎯", `${acc}%`, `答題正確率 (${P.answered} 題)`], ["🔄", P.mistakes.length, "待複習錯題"], ["🗓️", dailyStreak(), "連續每日挑戰"], ["🎤", P.micBest ? `${P.micBest} 分` : "—", `最佳發音 (${P.micTries || 0} 次)`]]
+        ${[["🔥", P.streak, "累積學習天數"], ["⚔️", `${P.completed.length}/20`, "已通關"], ["🎯", `${acc}%`, `答題正確率 (${P.answered} 題)`], ["🔄", P.mistakes.length, "待複習錯題"], ["🗓️", dailyStreak(), "連續每日挑戰"], ["🎤", P.micBest ? `${P.micBest} 分` : "—", `最佳發音 (${P.micTries || 0} 次)`], ["🃏", Object.keys(P.srs || {}).length, `學過的單字卡 (複習 ${P.srsReviews || 0} 次)`]]
           .map(([e, v, t]) => `<div class="card"><div class="emoji">${e}</div><div style="font-size:1.6rem;font-weight:700">${v}</div><div class="small muted">${t}</div></div>`).join("")}
       </div>
       <div class="card" style="margin-bottom:16px"><div class="spread"><h2>📅 學習紀錄</h2>
