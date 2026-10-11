@@ -488,14 +488,167 @@
   }
 
   // ===== 五十音（/kana、/kana_game、/write、/kana_loop） =====
+  /* ---------------- 何博士（何必日語）五十音學習法 ---------------- */
+  const HOBI = {
+    channel: "https://www.youtube.com/channel/UCZ5Wn4ss81cVKSk74Duv2BA",
+    resources: "https://www.yes588.com.tw/%E4%BD%95%E5%8D%9A%E5%A3%AB%E5%88%86%E4%BA%AB%E8%B3%87%E6%96%99%E5%BA%AB/",
+    playlist: "PLQK-Nv0UKQOfxIDflD8znoUFUJ5gNpGYW",
+    fastPlaylist: "PLQK-Nv0UKQOfI3HqOP1o2Zyh1XcW4gDTg",
+    videos: [
+      ["rJSv48e7nUw", "五十音從頭完整慢慢學（非速成版）"],
+      ["V7Qf7Xl9JSs", "學完五十音一定要會這四個字"],
+      ["mGtzF06cMq4", "學完五十音之後背單字最快的方法"],
+    ],
+  };
+  const VOWELS = ["a", "i", "u", "e", "o"];
+  const DAN = { a: "あ段", i: "い段", u: "う段", e: "え段", o: "お段" };
+  const kanaRowList = () => Object.values(D.kanaRows);
+  const vowelOf = (romaji) => { const r = romaji.split(" ")[0]; return r === "n" ? null : r.slice(-1); };
+
+  function hobiPage() {
+    const H = (P.hobi = Object.assign({ seqBest: 0, coord: 0, written: 0 }, P.hobi));
+    const heads = kanaRowList().map((r) => r.items[0].hira); // あかさたなはまやらわ
+    $app.innerHTML = `<p><a href="#/kana">← 五十音</a></p>
+      <h1>👨‍🏫 何博士五十音學習法</h1>
+      <p class="lead">結合 <a href="${HOBI.channel}" target="_blank" rel="noopener">何必日語・何必博士</a> 的五十音教學重點：
+        <b>先背直行、再背橫行、一定要用寫的、不用全背熟就進第一課</b>。影片與習字帖版權屬何必日語所有，本頁只做練習工具。</p>
+
+      <div class="card"><h2>STEP 1　🎬 先看何博士怎麼教</h2>
+        <div class="video"><iframe src="https://www.youtube-nocookie.com/embed/${HOBI.videos[0][0]}?list=${HOBI.playlist}" title="何必日語 五十音播放清單" loading="lazy" allowfullscreen
+          allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture"></iframe></div>
+        <div class="row" style="margin-top:10px"><a class="chip" href="https://www.youtube.com/playlist?list=${HOBI.playlist}" target="_blank" rel="noopener">📺 五十音播放清單</a>${HOBI.videos.map(([id, t]) => `<a class="chip" href="https://www.youtube.com/watch?v=${id}" target="_blank" rel="noopener">▶ ${t}</a>`).join("")}</div>
+        <div class="row" style="margin-top:10px">
+          <a class="btn small" href="https://www.youtube.com/playlist?list=${HOBI.fastPlaylist}" target="_blank" rel="noopener">⚡ 五十音速成播放清單</a>
+          <a class="btn small" href="${HOBI.resources}" target="_blank" rel="noopener">📄 何博士習字帖 PDF（官方資料庫）</a></div>
+        <p class="small muted">影片無法播放時，請點上方連結到 YouTube 觀看。</p></div>
+
+      <div class="card" style="margin-top:14px"><div class="spread"><h2>STEP 2　⬇️ 先背直行</h2><span class="small muted">最佳連對：${H.seqBest}</span></div>
+        <p class="small">每一行的第一個字連起來念，像背口訣一樣念到順口：</p>
+        <div class="row" style="gap:6px">${heads.map((k) => `<span class="kana-cell" style="padding:6px 10px"><span class="k" style="font-size:1.6rem">${k}</span></span>`).join("")}
+          ${speakBtn(heads.join("、"), "🔊 跟著念")}</div>
+        <div id="seq" style="margin-top:12px"></div></div>
+
+      <div class="card" style="margin-top:14px"><div class="spread"><h2>STEP 3　➡️ 再背橫行，用座標找假名</h2><span class="small muted">答對：${H.coord}</span></div>
+        <p class="small">每一行都照「<b>あ・い・う・え・お</b>」的母音順序排。記住直行（子音）＋橫行（母音），任何假名都找得到。例如 <b>か行 × う段 = く</b>。</p>
+        <div class="table-wrap"><table class="kana-matrix" id="matrix"><tr><th></th>${VOWELS.map((v) => `<th>${DAN[v]}</th>`).join("")}</tr>
+          ${kanaRowList().map((r, ri) => `<tr><th>${r.items[0].hira}行</th>${VOWELS.map((v) => {
+            const it = r.items.find((x) => vowelOf(x.romaji) === v);
+            return `<td data-cell="${ri}-${v}" class="jp">${it ? it.hira : ""}</td>`;
+          }).join("")}</tr>`).join("")}</table></div>
+        <div class="row" style="margin:8px 0"><label class="small"><input type="checkbox" id="hideMatrix"> 遮住表格（考自己）</label></div>
+        <div id="coord"></div></div>
+
+      <div class="card" style="margin-top:14px"><div class="spread"><h2>STEP 4　✍️ 一定要用寫的</h2><span class="small muted">已寫 ${H.written} 字</span></div>
+        <p class="small">何博士強調：假名是「圖形」，<b>用手寫就像畫圖，記得最快</b>。照著淡色字描，再遮住字自己寫一次。有紙筆的話，搭配上面的習字帖效果更好。</p>
+        <div class="row" style="margin-bottom:8px"><select id="wRow" style="width:auto">${kanaRowList().map((r, i) => `<option value="${i}">${esc(r.name)}</option>`).join("")}</select>
+          <label class="small"><input type="checkbox" id="wHide"> 遮住範本</label></div>
+        <div class="row" id="wPick" style="gap:6px;margin-bottom:8px"></div>
+        <div class="write-wrap"><canvas id="wCanvas" width="320" height="320"></canvas></div>
+        <div class="row" style="margin-top:8px;justify-content:center">
+          <button class="btn" id="wClear">🧽 擦掉</button><button class="btn" id="wSay">🔊 發音</button><button class="btn primary" id="wNext">寫好了，下一個 ➡️</button></div></div>
+
+      <div class="card" style="margin-top:14px"><h2>STEP 5　🚀 不用全背熟，直接開始</h2>
+        <p class="small">何博士的建議：五十音大致熟悉就進第一課，在學單字、句子的過程中自然會記牢。</p>
+        <div class="row"><a class="btn primary" href="#/quest/1">⚔️ 進入第 1 關</a><a class="btn" href="#/cards">🃏 五十音單字卡</a><a class="btn" href="#/kana/game">🎮 五十音消除遊戲</a></div></div>`;
+
+    // STEP 2：直行順序測驗（挖掉一格，選出缺的字）
+    let streak = 0;
+    const seqQ = () => {
+      const i = Math.floor(Math.random() * heads.length);
+      const opts = shuffle([heads[i], ...shuffle(heads.filter((_, j) => j !== i)).slice(0, 3)]);
+      const el = document.getElementById("seq");
+      el.innerHTML = `<div class="small muted">缺了哪一個？（連對 ${streak}）</div>
+        <div class="jp" style="font-size:1.6rem;letter-spacing:6px">${heads.map((k, j) => (j === i ? "＿" : k)).join(" ")}</div>
+        <div class="options">${opts.map((o) => `<button class="option jp" style="text-align:center;font-size:1.3rem">${o}</button>`).join("")}</div>`;
+      el.querySelectorAll(".option").forEach((b) => b.addEventListener("click", () => {
+        activity();
+        if (b.textContent === heads[i]) {
+          streak++; b.classList.add("correct"); speak(heads[i]);
+          if (streak > H.seqBest) { H.seqBest = streak; save(); }
+          setTimeout(seqQ, 500);
+        } else { streak = 0; b.classList.add("wrong"); toast(`答案是「${heads[i]}」，順序：${heads.join("")}`); setTimeout(seqQ, 1200); }
+      }));
+    };
+    seqQ();
+
+    // STEP 3：座標測驗（〇行 × 〇段 = ?）
+    const cells = kanaRowList().flatMap((r, ri) => r.items.filter((x) => vowelOf(x.romaji)).map((x) => ({ ...x, ri, v: vowelOf(x.romaji), head: r.items[0].hira })));
+    const matrix = document.getElementById("matrix");
+    document.getElementById("hideMatrix").addEventListener("change", (e) => matrix.classList.toggle("hidden-kana", e.target.checked));
+    const coordQ = () => {
+      const c = pick(cells);
+      const near = cells.filter((x) => x.hira !== c.hira && (x.ri === c.ri || x.v === c.v));
+      const opts = shuffle([c.hira, ...shuffle(near).slice(0, 3)].map((x) => x.hira || x));
+      const el = document.getElementById("coord");
+      el.innerHTML = `<div class="jp" style="font-size:1.3rem">${c.head}行 × ${DAN[c.v]} ＝ ？</div>
+        <div class="options">${opts.map((o) => `<button class="option jp" style="text-align:center;font-size:1.3rem">${o}</button>`).join("")}</div>`;
+      matrix.querySelectorAll("td").forEach((td) => td.classList.remove("hl"));
+      el.querySelectorAll(".option").forEach((b) => b.addEventListener("click", () => {
+        activity();
+        matrix.querySelector(`[data-cell="${c.ri}-${c.v}"]`).classList.add("hl");
+        if (b.textContent === c.hira) { b.classList.add("correct"); H.coord++; save(); speak(c.hira); setTimeout(coordQ, 700); }
+        else { b.classList.add("wrong"); toast(`${c.head}行 × ${DAN[c.v]} 是「${c.hira}」(${c.romaji})`); setTimeout(coordQ, 1600); }
+      }));
+    };
+    coordQ();
+
+    // STEP 4：米字格描寫
+    const cv = document.getElementById("wCanvas"), ctx = cv.getContext("2d");
+    let row = 0, idx = 0, drawing = false, last = null;
+    const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+    const drawGuide = () => {
+      const s = cv.width, k = kanaRowList()[row].items[idx];
+      ctx.clearRect(0, 0, s, s);
+      ctx.strokeStyle = css("--border"); ctx.lineWidth = 1; ctx.setLineDash([6, 6]);
+      ctx.beginPath(); ctx.moveTo(s / 2, 0); ctx.lineTo(s / 2, s); ctx.moveTo(0, s / 2); ctx.lineTo(s, s / 2);
+      ctx.moveTo(0, 0); ctx.lineTo(s, s); ctx.moveTo(s, 0); ctx.lineTo(0, s); ctx.stroke(); ctx.setLineDash([]);
+      if (!document.getElementById("wHide").checked) {
+        ctx.fillStyle = css("--muted"); ctx.globalAlpha = 0.22;
+        ctx.font = `700 ${s * 0.78}px "Zen Maru Gothic","Yu Gothic",sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(k.hira, s / 2, s / 2 + s * 0.04); ctx.globalAlpha = 1;
+      }
+      document.querySelectorAll("#wPick .chip").forEach((c, i) => c.classList.toggle("active", i === idx));
+    };
+    const renderPick = () => {
+      document.getElementById("wPick").innerHTML = kanaRowList()[row].items.map((k, i) => `<button class="chip jp" data-i="${i}">${k.hira}</button>`).join("");
+      document.querySelectorAll("#wPick .chip").forEach((c) => c.addEventListener("click", () => { idx = Number(c.dataset.i); drawGuide(); }));
+      drawGuide();
+    };
+    const pos = (e) => { const r = cv.getBoundingClientRect(), p = e.touches ? e.touches[0] : e; return [(p.clientX - r.left) * (cv.width / r.width), (p.clientY - r.top) * (cv.height / r.height)]; };
+    const start = (e) => { e.preventDefault(); drawing = true; last = pos(e); };
+    const move = (e) => {
+      if (!drawing) return; e.preventDefault();
+      const p = pos(e);
+      ctx.strokeStyle = css("--accent"); ctx.lineWidth = 12; ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.beginPath(); ctx.moveTo(...last); ctx.lineTo(...p); ctx.stroke(); last = p;
+    };
+    const end = () => { drawing = false; };
+    cv.addEventListener("pointerdown", start); cv.addEventListener("pointermove", move);
+    cv.addEventListener("pointerup", end); cv.addEventListener("pointerleave", end);
+    document.getElementById("wRow").addEventListener("change", (e) => { row = Number(e.target.value); idx = 0; renderPick(); });
+    document.getElementById("wHide").addEventListener("change", drawGuide);
+    document.getElementById("wClear").addEventListener("click", drawGuide);
+    document.getElementById("wSay").addEventListener("click", () => speak(kanaRowList()[row].items[idx].hira));
+    document.getElementById("wNext").addEventListener("click", () => {
+      activity(); H.written++; save();
+      const items = kanaRowList()[row].items;
+      if (idx < items.length - 1) idx++;
+      else { row = (row + 1) % kanaRowList().length; idx = 0; document.getElementById("wRow").value = row; renderPick(); toast("👏 這一行寫完了！換下一行"); }
+      drawGuide(); speak(kanaRowList()[row].items[idx].hira);
+    });
+    renderPick();
+  }
+
   pages.kana = (arg) => {
     if (arg === "game") return kanaGame();
+    if (arg === "hobi") return hobiPage();
     if (arg !== undefined && arg !== "") return kanaCard(Number(arg));
     $app.innerHTML = `
       <h1>🔤 五十音</h1>
       <p class="lead">點任一假名看字源、記憶口訣與發音技巧。</p>
       <div class="row" style="margin-bottom:16px">
-        <a class="btn primary" href="#/kana/game">🎮 五十音消除遊戲</a>
+        <a class="btn primary" href="#/kana/hobi">👨‍🏫 何博士學習法</a>
+        <a class="btn" href="#/kana/game">🎮 五十音消除遊戲</a>
         <a class="btn" href="kana_player.html">🌸 語音循環播放器</a>
         <a class="btn" href="handwriting.html">✍️ 米字格手寫板</a>
       </div>
