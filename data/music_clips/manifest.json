@@ -1,0 +1,82 @@
+{
+  "idol": {
+    "file": "data/music_clips/idol.m4a",
+    "preview_url": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview221/v4/f0/db/16/f0db16be-457e-f10f-98b6-f30b11de34e4/mzaf_5189430943078523093.plus.aac.p.m4a",
+    "artwork": "https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/3a/17/eb/3a17eb30-eacb-82eb-51df-d1321dbb55bc/197188492205.jpg/600x600bb.jpg",
+    "mv": "https://www.youtube.com/watch?v=ZRtdQ81jPUQ",
+    "spotify": "https://open.spotify.com/track/7uqLH4fO84E8pPslUe12vC",
+    "size": 1047712
+  },
+  "lemon": {
+    "file": "data/music_clips/lemon.m4a",
+    "preview_url": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview211/v4/27/17/9b/27179b15-2153-25e8-d035-35fdb4d059d8/mzaf_757024838235216109.plus.aac.p.m4a",
+    "artwork": "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/86/b0/9d/86b09d63-367a-563a-1e24-d5d62c220ac8/jacket_SRCL09749B00Z_550.jpg/600x600bb.jpg",
+    "mv": "https://www.youtube.com/watch?v=SX_ViT4Ra7k",
+    "spotify": "https://open.spotify.com/track/0wOwwNqC9Fm0e1yV5fV4vQ",
+    "size": 1007151
+  },
+  "first_love": {
+    "file": "data/music_clips/first_love.m4a",
+    "preview_url": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview221/v4/d0/b8/23/d0b823d5-e55b-6ee8-c1ec-2c91fd43aba3/mzaf_706648209162590351.plus.aac.p.m4a",
+    "artwork": "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/77/67/00/77670013-e2ed-437a-dc30-e9cb74056cbe/00600406427052.rgb.jpg/600x600bb.jpg",
+    "mv": "https://www.youtube.com/watch?v=o1sUaVJUeB0",
+    "spotify": "https://open.spotify.com/track/3kP7xKqO6qC0Nq2B0kLh9G",
+    "size": 1078346
+  },
+  "marigold": {
+    "file": "data/music_clips/marigold.m4a",
+    "preview_url": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview221/v4/5a/73/39/5a7339e0-bb69-932a-8caf-02a88032c469/mzaf_9781898984182053364.plus.aac.p.m4a",
+    "artwork": "https://is1-ssl.mzstatic.com/image/thumb/Music124/v4/3c/3b/f6/3c3bf6e8-1947-347e-f6f0-c857ca4c026f/190295490089.jpg/600x600bb.jpg",
+    "mv": "https://www.youtube.com/watch?v=0xSiBpUdW4E",
+    "spotify": "https://open.spotify.com/track/5c8cQkQvK4C2E4aYxN8a9L",
+    "size": 1014283
+  },
+  "gurenge": {
+    "file": "data/music_clips/gurenge.m4a",
+    "preview_url": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview221/v4/d7/45/22/d7452274-6107-7ace-420b-1b509d55d067/mzaf_15546458713313472040.plus.aac.p.m4a",
+    "artwork": "https://is1-ssl.mzstatic.com/image/thumb/Music124/v4/b3/ae/3b/b3ae3bd0-47cc-6349-1d0d-a01928796a62/jacket_VVXX00432B00Z_550.jpg/600x600bb.jpg",
+    "mv": "https://www.youtube.com/watch?v=CwkzK-F0Y00",
+    "spotify": "https://open.spotify.com/track/23cqOg209w185aR5nS2k9h",
+    "size": 977172
+  },
+  "zenzenzense": {
+    "file": "data/music_clips/zenzenzense.m4a",
+    "preview_url": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview221/v4/f8/fd/9f/f8fd9f88-67e8-ce12-f44d-1b4fe421f1f9/mzaf_5313510550820503304.plus.aac.p.m4a",
+    "artwork": "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/56/b3/8c/56b38c05-1728-402c-016c-c1e4b0635be8/4988031167618_cover.jpg/600x600bb.jpg",
+    "mv": "https://www.youtube.com/watch?v=PDSkFeMVNFs",
+    "spotify": "https://open.spotify.com/track/4bNlF7aM634oGq8vXkL3Bv",
+    "size": 1025810
+  },
+  "dryflower": {
+    "file": "data/music_clips/dryflower.m4a",
+    "preview_url": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview221/v4/98/2a/3e/982a3e95-2971-c9d8-71cb-8dc4454a3015/mzaf_2504327796965667515.plus.aac.p.m4a",
+    "artwork": "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/d2/23/07/d2230757-3f9c-fccd-3cc8-333f7be09716/4547366478655.jpg/600x600bb.jpg",
+    "mv": "https://www.youtube.com/watch?v=kzZ6KXDM1RI",
+    "spotify": "https://open.spotify.com/track/10vJjR7oBv4h6uVl7oRkL4",
+    "size": 1021456
+  },
+  "cherry": {
+    "file": "data/music_clips/cherry.m4a",
+    "preview_url": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview211/v4/2c/d6/b6/2cd6b6a3-977c-51be-6156-d8952c045ecf/mzaf_15591289069785956671.plus.aac.p.m4a",
+    "artwork": "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/64/93/ca/6493cab1-9aea-954e-505d-1ba9ffc6926d/4988021862318.png/600x600bb.jpg",
+    "mv": "https://www.youtube.com/watch?v=51CH3dPaWXc",
+    "spotify": "https://open.spotify.com/track/30wU4vK0Oa9k4zO6J5sVv9",
+    "size": 1001147
+  },
+  "hakujitsu": {
+    "file": "data/music_clips/hakujitsu.m4a",
+    "preview_url": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview211/v4/f8/29/17/f8291760-8541-ba79-ab63-368cc9699378/mzaf_2236334770837479513.plus.aac.p.m4a",
+    "artwork": "https://is1-ssl.mzstatic.com/image/thumb/Music114/v4/3e/b8/ef/3eb8ef78-c575-eb81-f982-aaec74b5fe53/jacket_BVXX01177B00Z_550.jpg/600x600bb.jpg",
+    "mv": "https://www.youtube.com/watch?v=ony539T074U",
+    "spotify": "https://open.spotify.com/track/4Msz3yUfM0G9I7Y3Gq0vL2",
+    "size": 993084
+  },
+  "kaiju": {
+    "file": "data/music_clips/kaiju.m4a",
+    "preview_url": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview221/v4/c5/9a/ec/c59aec70-94cd-1bac-884e-2cd8c1401abf/mzaf_17538645848549560384.plus.aac.p.m4a",
+    "artwork": "https://is1-ssl.mzstatic.com/image/thumb/Music116/v4/8a/eb/75/8aeb7526-6fe4-a81a-5dce-c5d026e7f036/4547366655728.jpg/600x600bb.jpg",
+    "mv": "https://www.youtube.com/watch?v=UM9XNpgrqBk",
+    "spotify": "https://open.spotify.com/track/25jS3bU8GgU9Qp4t4rQfE4",
+    "size": 1030738
+  }
+}

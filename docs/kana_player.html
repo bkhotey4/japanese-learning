@@ -1,0 +1,1121 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🌸 五十音沉浸式語音循環播放器 | Japanese Kana Player</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;700;900&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #ff6b8b;
+      --primary-dark: #e0486b;
+      --bg-gradient: linear-gradient(135deg, #fff5f7 0%, #ffe6ec 50%, #f0f4ff 100%);
+      --card-bg: rgba(255, 255, 255, 0.92);
+      --text-main: #2d3748;
+      --text-muted: #718096;
+      --accent: #4fd1c5;
+      --shadow: 0 20px 40px -15px rgba(255, 107, 139, 0.25);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Noto Sans TC', sans-serif;
+      background: var(--bg-gradient);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-main);
+      padding: 20px;
+      user-select: none;
+      overflow-x: hidden;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 680px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+    }
+
+    /* Header */
+    header {
+      text-align: center;
+    }
+    header h1 {
+      font-family: 'Zen Maru Gothic', sans-serif;
+      font-size: 26px;
+      font-weight: 900;
+      color: var(--primary-dark);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    header p {
+      font-size: 14px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    /* Card */
+    .card {
+      width: 100%;
+      background: var(--card-bg);
+      backdrop-filter: blur(16px);
+      border-radius: 28px;
+      padding: 32px 28px;
+      box-shadow: var(--shadow);
+      border: 1px solid rgba(255, 255, 255, 0.8);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .card-badge {
+      position: absolute;
+      top: 20px;
+      left: 24px;
+      background: #ffe3e8;
+      color: var(--primary-dark);
+      padding: 4px 14px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .card-counter {
+      position: absolute;
+      top: 20px;
+      right: 24px;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-muted);
+    }
+
+    .kana-display {
+      margin: 20px 0 10px 0;
+      display: flex;
+      align-items: baseline;
+      justify-content: center;
+      gap: 24px;
+    }
+
+    .hira-char {
+      font-family: 'Zen Maru Gothic', sans-serif;
+      font-size: 105px;
+      font-weight: 900;
+      color: var(--primary-dark);
+      line-height: 1;
+      text-shadow: 2px 4px 12px rgba(255, 107, 139, 0.2);
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+    .hira-char:hover {
+      transform: scale(1.06);
+    }
+
+    .kata-char {
+      font-family: 'Zen Maru Gothic', sans-serif;
+      font-size: 56px;
+      font-weight: 700;
+      color: #a0aec0;
+      line-height: 1;
+    }
+
+    .romaji-tag {
+      background: #edf2f7;
+      color: #4a5568;
+      font-size: 18px;
+      font-weight: 700;
+      padding: 4px 18px;
+      border-radius: 12px;
+      letter-spacing: 1px;
+      margin-bottom: 20px;
+    }
+
+    .details-box {
+      width: 100%;
+      background: rgba(247, 250, 252, 0.88);
+      border-radius: 18px;
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      font-size: 14.5px;
+      line-height: 1.6;
+    }
+
+    .detail-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .detail-label {
+      font-weight: 700;
+      color: #4a5568;
+      min-width: 80px;
+      flex-shrink: 0;
+    }
+    .detail-content {
+      color: #2d3748;
+    }
+
+    .vocab-highlight {
+      background: #fff0f3;
+      color: var(--primary-dark);
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-weight: 700;
+    }
+
+    /* Progress Bar */
+    .progress-track {
+      width: 100%;
+      height: 6px;
+      background: #edf2f7;
+      border-radius: 4px;
+      overflow: hidden;
+      margin-top: 16px;
+    }
+    .progress-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--primary), var(--accent));
+      transition: width 0.3s;
+    }
+
+    /* Controls */
+    .controls-panel {
+      width: 100%;
+      background: var(--card-bg);
+      border-radius: 20px;
+      padding: 18px 24px;
+      box-shadow: 0 10px 25px -10px rgba(0, 0, 0, 0.08);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .playback-buttons {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+    }
+
+    .btn {
+      border: none;
+      outline: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: inherit;
+      font-weight: 700;
+      transition: all 0.2s;
+    }
+
+    .btn-main {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+      color: #fff;
+      font-size: 26px;
+      box-shadow: 0 8px 20px rgba(255, 107, 139, 0.4);
+    }
+    .btn-main:hover {
+      transform: scale(1.08);
+    }
+    .btn-main:active {
+      transform: scale(0.96);
+    }
+
+    .btn-sec {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: #edf2f7;
+      color: #4a5568;
+      font-size: 18px;
+    }
+    .btn-sec:hover {
+      background: #e2e8f0;
+      transform: scale(1.06);
+    }
+
+    .options-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 13.5px;
+      color: var(--text-muted);
+      border-top: 1px solid #edf2f7;
+      padding-top: 14px;
+    }
+
+    .option-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    select, .speed-btn {
+      padding: 6px 12px;
+      border-radius: 10px;
+      border: 1px solid #e2e8f0;
+      background: #fff;
+      color: #4a5568;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .toggle-active {
+      background: #ffe3e8 !important;
+      color: var(--primary-dark) !important;
+      border-color: var(--primary) !important;
+    }
+
+    footer {
+      font-size: 13px;
+      color: #a0aec0;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🌸 五十音沉浸式語音循環播放器</h1>
+      <p>放鬆聆聽・自動翻頁・直覺化記憶 46 音</p>
+    </header>
+
+    <div class="card" id="card">
+      <div class="card-badge" id="badge-row">あ行</div>
+      <div class="card-counter" id="counter">1 / 46</div>
+
+      <div class="kana-display">
+        <div class="hira-char" id="hira" title="點擊收聽發音">あ</div>
+        <div class="kata-char" id="kata">ア</div>
+      </div>
+
+      <div class="romaji-tag" id="romaji">a</div>
+
+      <div class="details-box">
+        <div class="detail-item">
+          <span class="detail-label">📜 漢字字源：</span>
+          <span class="detail-content" id="origin">安 (漢字草書「安」的圓潤化)</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">💡 記憶口訣：</span>
+          <span class="detail-content" id="mnemonic">看到紅蘋果驚呼：『啊（あ）！好甜的蘋果！』</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">👄 嘴型要訣：</span>
+          <span class="detail-content" id="tip">嘴型自然放鬆微張，舌頭平放，輕輕吐氣發音。</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">📖 必學單字：</span>
+          <span class="detail-content" id="vocab"><span class="vocab-highlight">朝 (あさ)</span> — 早晨</span>
+        </div>
+      </div>
+
+      <div class="progress-track">
+        <div class="progress-bar" id="progress"></div>
+      </div>
+    </div>
+
+    <div class="controls-panel">
+      <div class="playback-buttons">
+        <button class="btn btn-sec" id="btn-prev" title="上一個 (←)">⏮️</button>
+        <button class="btn btn-main" id="btn-play" title="播放/暫停 (Space)">▶️</button>
+        <button class="btn btn-sec" id="btn-next" title="下一個 (→)">⏭️</button>
+        <button class="btn btn-sec" id="btn-voice" title="發音開關">🔊</button>
+      </div>
+
+      <div class="options-row">
+        <div class="option-group">
+          <span>📂 行別選擇：</span>
+          <select id="select-row">
+            <option value="all">全部 46 音 (全循環)</option>
+            <option value="0">あ行 (a, i, u, e, o)</option>
+            <option value="5">か行 (ka, ki, ku, ke, ko)</option>
+            <option value="10">さ行 (sa, shi, su, se, so)</option>
+            <option value="15">た行 (ta, chi, tsu, te, to)</option>
+            <option value="20">な行 (na, ni, nu, ne, no)</option>
+            <option value="25">は行 (ha, hi, fu, he, ho)</option>
+            <option value="30">ま行 (ma, mi, mu, me, mo)</option>
+            <option value="35">や行 (ya, yu, yo)</option>
+            <option value="38">ら行 (ra, ri, ru, re, ro)</option>
+            <option value="43">わ行・撥音 (wa, wo, n)</option>
+          </select>
+        </div>
+
+        <div class="option-group">
+          <span>⏱️ 換卡速度：</span>
+          <select id="select-speed">
+            <option value="2500">2.5 秒 (快速衝刺)</option>
+            <option value="4000" selected>4 秒 (舒適沉浸)</option>
+            <option value="6000">6 秒 (深度熟記)</option>
+            <option value="8000">8 秒 (慢速跟讀)</option>
+          </select>
+        </div>
+
+        <div class="option-group">
+          <button class="speed-btn" id="btn-shuffle" title="隨機模式">🎲 隨機播放</button>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      💡 快捷鍵提示：空白鍵 (播放/暫停) | 方向鍵 ← → (切換假名) | 點擊大假名可重播發音
+    </footer>
+  </div>
+
+  <script>
+    const KANA_CARDS = [
+  {
+    "index": 0,
+    "row": "あ行",
+    "hira": "あ",
+    "kata": "ア",
+    "romaji": "a",
+    "origin": "平假名源自「安」之草書；片假名源自「阿」之左耳偏旁。",
+    "mnemonic": "肚子圓圓像個『安』，孕婦摸著肚子說『啊～真安心』！",
+    "sound_tip": "嘴巴自然放鬆張大，像看醫生時說『啊～』的輕鬆元音。",
+    "vocab": "ありがとう (arigatou)",
+    "vocab_tw": "謝謝"
+  },
+  {
+    "index": 1,
+    "row": "あ行",
+    "hira": "い",
+    "kata": "イ",
+    "romaji": "i",
+    "origin": "平假名源自「以」之草書；片假名源自「伊」之單人旁。",
+    "mnemonic": "兩根直立的吸管（以/伊），發出一（i）的聲音！",
+    "sound_tip": "嘴角向左右兩側微拉，發出清晰乾淨的『一』。",
+    "vocab": "いいえ (iie)",
+    "vocab_tw": "不是 / 不客氣"
+  },
+  {
+    "index": 2,
+    "row": "あ行",
+    "hira": "う",
+    "kata": "ウ",
+    "romaji": "u",
+    "origin": "平假名源自「宇」之草書；片假名源自「宇」之寶蓋頭。",
+    "mnemonic": "被人在肚子上捶了一拳，整個人痛苦彎腰說『嗚～』！",
+    "sound_tip": "特別注意！嘴唇千萬不要向前嘟起，嘴唇放鬆微閉發音。",
+    "vocab": "うどん (udon)",
+    "vocab_tw": "烏龍麵"
+  },
+  {
+    "index": 3,
+    "row": "あ行",
+    "hira": "え",
+    "kata": "エ",
+    "romaji": "e",
+    "origin": "平假名源自「衣」之草書；片假名源自「江」之右半部。",
+    "mnemonic": "長得像元寶的小鳥，發出『誒？』的驚訝聲！",
+    "sound_tip": "嘴角自然微微張開，介於中文的『ㄝ』與『ㄟ』之間。",
+    "vocab": "えき (eki)",
+    "vocab_tw": "車站"
+  },
+  {
+    "index": 4,
+    "row": "あ行",
+    "hira": "お",
+    "kata": "オ",
+    "romaji": "o",
+    "origin": "平假名源自「於」之草書；片假名源自「於」之左旁偏旁。",
+    "mnemonic": "皮帶繫在圓滾滾肚子上，興奮喊出『喔！』！",
+    "sound_tip": "雙唇微收呈圓形，發出飽滿圓潤的『喔』。",
+    "vocab": "おいしい (oishii)",
+    "vocab_tw": "好吃的 / 美味"
+  },
+  {
+    "index": 5,
+    "row": "か行",
+    "hira": "か",
+    "kata": "カ",
+    "romaji": "ka",
+    "origin": "平假名源自「加」之草書；片假名源自「加」之力旁。",
+    "mnemonic": "『力』字加上一點，卡（ka）住拔不出來！",
+    "sound_tip": "舌根抵住軟顎後爆破，清脆短促的 ka。",
+    "vocab": "かわいい (kawaii)",
+    "vocab_tw": "可愛的"
+  },
+  {
+    "index": 6,
+    "row": "か行",
+    "hira": "き",
+    "kata": "キ",
+    "romaji": "ki",
+    "origin": "平假名源自「幾」之草書；片假名源自「幾」之上半。",
+    "mnemonic": "兩橫一豎帶個圈，長得像一把雙齒鑰匙（Key / き）！",
+    "sound_tip": "舌面貼近硬顎發出清脆俐落的 ki。",
+    "vocab": "きっぷ (kippu)",
+    "vocab_tw": "車票"
+  },
+  {
+    "index": 7,
+    "row": "か行",
+    "hira": "く",
+    "kata": "ク",
+    "romaji": "ku",
+    "origin": "平假名源自「久」之草書；片假名源自「久」之初筆。",
+    "mnemonic": "小鳥長開尖尖嘴巴『<』，肚子餓哭（ku）著要食物！",
+    "sound_tip": "嘴唇放鬆不向前突出，輕發 ku。",
+    "vocab": "くち (kuchi)",
+    "vocab_tw": "嘴巴 / 出口"
+  },
+  {
+    "index": 8,
+    "row": "か行",
+    "hira": "け",
+    "kata": "ケ",
+    "romaji": "ke",
+    "origin": "平假名源自「計」之草書；片假名源自「介」之初筆。",
+    "mnemonic": "寶劍佩掛在木架上，等待佩劍的客（ke）人！",
+    "sound_tip": "短促有力的 ke，不拖沓帶尾音。",
+    "vocab": "けいさつ (keisatsu)",
+    "vocab_tw": "警察"
+  },
+  {
+    "index": 9,
+    "row": "か行",
+    "hira": "こ",
+    "kata": "コ",
+    "romaji": "ko",
+    "origin": "平假名源自「己」之草書；片假名源自「己」之上半。",
+    "mnemonic": "上下兩條平行線，像個開口笑的扣（ko）子！",
+    "sound_tip": "圓唇發 ko，聲音落在喉腔前側。",
+    "vocab": "こんにちは (konnichiwa)",
+    "vocab_tw": "你好 (白天問候)"
+  },
+  {
+    "index": 10,
+    "row": "さ行",
+    "hira": "さ",
+    "kata": "サ",
+    "romaji": "sa",
+    "origin": "平假名源自「左」之草書；片假名源自「散」之初筆。",
+    "mnemonic": "雙手合十，在寺廟前灑（sa）水祈福洗手！",
+    "sound_tip": "舌尖靠近上齒齦發出摩擦音 sa。",
+    "vocab": "さくら (sakura)",
+    "vocab_tw": "櫻花"
+  },
+  {
+    "index": 11,
+    "row": "さ行",
+    "hira": "し",
+    "kata": "シ",
+    "romaji": "shi",
+    "origin": "平假名源自「之」之草書；片假名源自「之」之草書水部。",
+    "mnemonic": "長得像吸（shi）管，也像釣魚時彎彎的魚鉤！",
+    "sound_tip": "特別注意！不是 si，而是舌面抬起發輕柔的 shi（西/吸）。",
+    "vocab": "しんかんせん (shinkansen)",
+    "vocab_tw": "新幹線"
+  },
+  {
+    "index": 12,
+    "row": "さ行",
+    "hira": "す",
+    "kata": "ス",
+    "romaji": "su",
+    "origin": "平假名源自「寸」之草書；片假名源自「須」之右旁。",
+    "mnemonic": "一根繩子打了個圓圈小結，吐氣如絲（su）！",
+    "sound_tip": "上下齒輕合留細縫，發出細微的 su（絲）。",
+    "vocab": "すし (sushi)",
+    "vocab_tw": "壽司"
+  },
+  {
+    "index": 13,
+    "row": "さ行",
+    "hira": "せ",
+    "kata": "セ",
+    "romaji": "se",
+    "origin": "平假名源自「世」之草書；片假名源自「世」之初筆。",
+    "mnemonic": "世界的『世』少了一筆，發音就是 se（世）！",
+    "sound_tip": "嘴角微張，發音清爽俐落。",
+    "vocab": "せんせい (sensei)",
+    "vocab_tw": "老師"
+  },
+  {
+    "index": 14,
+    "row": "さ行",
+    "hira": "そ",
+    "kata": "ソ",
+    "romaji": "so",
+    "origin": "平假名源自「曾」之草書；片假名源自「曾」之頭兩筆。",
+    "mnemonic": "連續轉彎的折線，縮（so）在一團！",
+    "sound_tip": "圓唇清脆發 so。",
+    "vocab": "そば (soba)",
+    "vocab_tw": "蕎麥麵"
+  },
+  {
+    "index": 15,
+    "row": "た行",
+    "hira": "た",
+    "kata": "タ",
+    "romaji": "ta",
+    "origin": "平假名源自「太」之草書；片假名源自「多」之初筆。",
+    "mnemonic": "長得像英文字母『ta』的合體，發音正是 ta！",
+    "sound_tip": "舌尖抵上齒齦快速彈開，俐落發 ta。",
+    "vocab": "たべる (taberu)",
+    "vocab_tw": "吃"
+  },
+  {
+    "index": 16,
+    "row": "た行",
+    "hira": "ち",
+    "kata": "チ",
+    "romaji": "chi",
+    "origin": "平假名源自「知」之草書；片假名源自「千」。",
+    "mnemonic": "長得像數字『5』，發音像中文的『七（chi）』！",
+    "sound_tip": "注意！不是 ti，而是像中文『七』的 chi。",
+    "vocab": "ちかてつ (chikatetsu)",
+    "vocab_tw": "地下鐵"
+  },
+  {
+    "index": 17,
+    "row": "た行",
+    "hira": "つ",
+    "kata": "ツ",
+    "romaji": "tsu",
+    "origin": "平假名源自「川」之草書；片假名源自「川」之三點水。",
+    "mnemonic": "像彎彎的月亮，刺（tsu）痛了黑夜！",
+    "sound_tip": "重要！舌尖抵住上門牙內側，突然放氣發 tsu（疵）。",
+    "vocab": "つき (tsuki)",
+    "vocab_tw": "月亮"
+  },
+  {
+    "index": 18,
+    "row": "た行",
+    "hira": "て",
+    "kata": "テ",
+    "romaji": "te",
+    "origin": "平假名源自「天」之草書；片假名源自「天」之初筆。",
+    "mnemonic": "長得像一隻伸出來要糖吃的小手（手 / te）！",
+    "sound_tip": "舌尖彈開爆破發 te。",
+    "vocab": "てがみ (tegami)",
+    "vocab_tw": "書信 / 信件"
+  },
+  {
+    "index": 19,
+    "row": "た行",
+    "hira": "と",
+    "kata": "ト",
+    "romaji": "to",
+    "origin": "平假名源自「止」之草書；片假名源自「止」之初筆。",
+    "mnemonic": "長得像一根刺扎進腳趾（Toe / と）！",
+    "sound_tip": "圓唇乾淨發 to。",
+    "vocab": "とうきょう (toukyou)",
+    "vocab_tw": "東京"
+  },
+  {
+    "index": 20,
+    "row": "な行",
+    "hira": "な",
+    "kata": "ナ",
+    "romaji": "na",
+    "origin": "平假名源自「奈」之草書；片假名源自「奈」之初筆。",
+    "mnemonic": "美麗的奈良（na）小鹿向你點頭要鹿仙貝！",
+    "sound_tip": "鼻音微起，舌尖貼上門牙發 na。",
+    "vocab": "なまえ (namae)",
+    "vocab_tw": "名字"
+  },
+  {
+    "index": 21,
+    "row": "な行",
+    "hira": "に",
+    "kata": "ニ",
+    "romaji": "ni",
+    "origin": "平假名源自「仁」之草書；片假名源自漢字「二」。",
+    "mnemonic": "片假名就是『二』，發音像中文的『你 (ni)』！",
+    "sound_tip": "舌面貼硬顎發 ni。",
+    "vocab": "にほん (nihon)",
+    "vocab_tw": "日本"
+  },
+  {
+    "index": 22,
+    "row": "な行",
+    "hira": "ぬ",
+    "kata": "ヌ",
+    "romaji": "nu",
+    "origin": "平假名源自「奴」之草書；片假名源自「奴」之右旁。",
+    "mnemonic": "一碗香噴噴的拉麵（Noodle / ぬ），帶個打結小圈圈！",
+    "sound_tip": "雙唇放鬆不要嘟起，輕柔發 nu（奴）。",
+    "vocab": "ぬいぐるみ (nuigurumi)",
+    "vocab_tw": "玩偶布偶"
+  },
+  {
+    "index": 23,
+    "row": "な行",
+    "hira": "ね",
+    "kata": "ネ",
+    "romaji": "ne",
+    "origin": "平假名源自「禰」之草書；片假名源自「禰」之示字旁。",
+    "mnemonic": "像一隻尾巴捲捲可愛的小貓咪（ねこ / 猫 / ne）！",
+    "sound_tip": "自然發 ne（捏）。",
+    "vocab": "ねこ (neko)",
+    "vocab_tw": "貓咪"
+  },
+  {
+    "index": 24,
+    "row": "な行",
+    "hira": "の",
+    "kata": "ノ",
+    "romaji": "no",
+    "origin": "平假名源自「乃」之草書；片假名源自「乃」之左撇。",
+    "mnemonic": "一筆畫畫個禁止通行圓圈（NO / の），超好記！",
+    "sound_tip": "圓唇發 no，聲線溫柔。",
+    "vocab": "のみもの (nomimono)",
+    "vocab_tw": "飲料"
+  },
+  {
+    "index": 25,
+    "row": "は行",
+    "hira": "は",
+    "kata": "ハ",
+    "romaji": "ha",
+    "origin": "平假名源自「波」之草書；片假名源自漢字「八」。",
+    "mnemonic": "開心時哈哈（ha）大笑！作為主題助詞時唸 wa！",
+    "sound_tip": "喉頭微開氣音 ha。注意作為主題助詞時發 wa 音。",
+    "vocab": "はい (hai)",
+    "vocab_tw": "是的"
+  },
+  {
+    "index": 26,
+    "row": "は行",
+    "hira": "ひ",
+    "kata": "ヒ",
+    "romaji": "hi",
+    "origin": "平假名源自「比」之草書；片假名源自「比」之右旁。",
+    "mnemonic": "長得像一張裂開傻笑的嘴臉（He-he / ひひ）！",
+    "sound_tip": "舌面貼近硬顎擦出微弱氣流，介於『希』與『西』。",
+    "vocab": "ひこうき (hikouki)",
+    "vocab_tw": "飛機"
+  },
+  {
+    "index": 27,
+    "row": "は行",
+    "hira": "ふ",
+    "kata": "フ",
+    "romaji": "fu",
+    "origin": "平假名源自「不」之草書；片假名源自「不」之初筆。",
+    "mnemonic": "富士山（Fujisan / ふ）頭頂冒出雪花與火花！",
+    "sound_tip": "千萬不要咬下唇！上下唇微合留小縫，輕輕吹氣發 fu。",
+    "vocab": "ふじさん (fujisan)",
+    "vocab_tw": "富士山"
+  },
+  {
+    "index": 28,
+    "row": "は行",
+    "hira": "へ",
+    "kata": "ヘ",
+    "romaji": "he",
+    "origin": "平假名與片假名皆源自草書「部」之右旁。",
+    "mnemonic": "平假名與片假名長得完全一樣！像一座尖尖屋頂（へ）！",
+    "sound_tip": "氣流穿過喉部發 he。作為方向助詞時唸 e。",
+    "vocab": "へや (heya)",
+    "vocab_tw": "房間"
+  },
+  {
+    "index": 29,
+    "row": "は行",
+    "hira": "ほ",
+    "kata": "ホ",
+    "romaji": "ho",
+    "origin": "平假名源自「保」之草書；片假名源自「保」之右旁。",
+    "mnemonic": "戴了一頂平平的帽子，乖乖在後（ho）面排隊！",
+    "sound_tip": "圓唇清爽發 ho。",
+    "vocab": "ホテル (hoteru)",
+    "vocab_tw": "飯店 / 旅館"
+  },
+  {
+    "index": 30,
+    "row": "ま行",
+    "hira": "ま",
+    "kata": "マ",
+    "romaji": "ma",
+    "origin": "平假名源自「末」之草書；片假名源自「末」之上兩筆。",
+    "mnemonic": "兩條橫線一個圈，媽媽（ma）摸摸小寶貝的頭！",
+    "sound_tip": "雙唇微合鼻音爆破發 ma。",
+    "vocab": "また (mata)",
+    "vocab_tw": "再 / 下次"
+  },
+  {
+    "index": 31,
+    "row": "ま行",
+    "hira": "み",
+    "kata": "ミ",
+    "romaji": "mi",
+    "origin": "平假名源自「美」之草書；片假名源自漢字「三」。",
+    "mnemonic": "長得像數字『21』，看到美食眼睛瞇瞇笑（mi）！",
+    "sound_tip": "雙唇閉合發 mi。",
+    "vocab": "みず (mizu)",
+    "vocab_tw": "水"
+  },
+  {
+    "index": 32,
+    "row": "ま行",
+    "hira": "む",
+    "kata": "ム",
+    "romaji": "mu",
+    "origin": "平假名源自「武」之草書；片假名源自「牟」之初筆。",
+    "mnemonic": "像一頭牛轉頭伸出尾巴，發出『哞～（mu）』的叫聲！",
+    "sound_tip": "雙唇放鬆輕發 mu。",
+    "vocab": "むすめ (musume)",
+    "vocab_tw": "女兒"
+  },
+  {
+    "index": 33,
+    "row": "ま行",
+    "hira": "め",
+    "kata": "メ",
+    "romaji": "me",
+    "origin": "平假名源自「女」之草書；片假名源自「女」之末兩筆。",
+    "mnemonic": "像一隻美麗的眼睛（目 / me），注意右下角不打結圈圈！",
+    "sound_tip": "嘴角自然放鬆發 me（妹）。",
+    "vocab": "めがね (megane)",
+    "vocab_tw": "眼鏡"
+  },
+  {
+    "index": 34,
+    "row": "ま行",
+    "hira": "も",
+    "kata": "モ",
+    "romaji": "mo",
+    "origin": "平假名源自「毛」之草書；片假名源自「毛」之初三筆。",
+    "mnemonic": "長得像毛（mo）髮的草書，也是撈金魚的魚鉤！",
+    "sound_tip": "雙唇閉合微爆發 mo。",
+    "vocab": "もっと (motto)",
+    "vocab_tw": "更多 / 更加"
+  },
+  {
+    "index": 35,
+    "row": "や行",
+    "hira": "や",
+    "kata": "ヤ",
+    "romaji": "ya",
+    "origin": "平假名源自「也」之草書；片假名源自「也」之初筆。",
+    "mnemonic": "拍照時比出勝利剪刀手『耶（ya）』！",
+    "sound_tip": "舌面快速滑向元音 a 發 ya。",
+    "vocab": "やすみ (yasumi)",
+    "vocab_tw": "休息 / 假期"
+  },
+  {
+    "index": 36,
+    "row": "や行",
+    "hira": "ゆ",
+    "kata": "ユ",
+    "romaji": "yu",
+    "origin": "平假名源自「由」之草書；片假名源自「由」之初筆。",
+    "mnemonic": "一隻姿態優雅（yu）游水的小熱帶魚！",
+    "sound_tip": "舌面向硬顎滑動發 yu（優）。",
+    "vocab": "ゆき (yuki)",
+    "vocab_tw": "雪"
+  },
+  {
+    "index": 37,
+    "row": "や行",
+    "hira": "よ",
+    "kata": "ヨ",
+    "romaji": "yo",
+    "origin": "平假名源自「与」之草書；片假名源自「与」之初筆。",
+    "mnemonic": "像吊車勾起重物，嗨唷（yo）一聲拉上來！",
+    "sound_tip": "圓唇發 yo（唷）。",
+    "vocab": "ようこそ (youkoso)",
+    "vocab_tw": "歡迎光臨"
+  },
+  {
+    "index": 38,
+    "row": "ら行",
+    "hira": "ら",
+    "kata": "ラ",
+    "romaji": "ra",
+    "origin": "平假名源自「良」之草書；片假名源自「良」之初筆。",
+    "mnemonic": "一個人在溫泉裡舒暢泡湯，大呼好爽啦（ra）！",
+    "sound_tip": "絕非捲舌音！舌尖輕彈上齒齦發 la/da。",
+    "vocab": "ラーメン (rāmen)",
+    "vocab_tw": "拉麵"
+  },
+  {
+    "index": 39,
+    "row": "ら行",
+    "hira": "り",
+    "kata": "リ",
+    "romaji": "ri",
+    "origin": "平假名源自「利」之草書；片假名源自「利」之右旁。",
+    "mnemonic": "兩條俐落垂直線，右長左短，俐（ri）落清秀！",
+    "sound_tip": "舌尖輕彈發 li。",
+    "vocab": "りんご (ringo)",
+    "vocab_tw": "蘋果"
+  },
+  {
+    "index": 40,
+    "row": "ら行",
+    "hira": "る",
+    "kata": "ル",
+    "romaji": "ru",
+    "origin": "平假名源自「留」之草書；片假名源自「流」之末兩筆。",
+    "mnemonic": "尾巴捲起一個小圈圈，抓住了一隻嚕（ru）嚕米！",
+    "sound_tip": "舌尖輕彈發 lu。",
+    "vocab": "るす (rusu)",
+    "vocab_tw": "不在家 / 留守"
+  },
+  {
+    "index": 41,
+    "row": "ら行",
+    "hira": "れ",
+    "kata": "レ",
+    "romaji": "re",
+    "origin": "平假名源自「礼」之草書；片假名源自「礼」之右旁。",
+    "mnemonic": "向神明躬身敬禮（礼 / re），尾巴往右外翹！",
+    "sound_tip": "舌尖輕彈發 le。",
+    "vocab": "れすとらん (resutoran)",
+    "vocab_tw": "餐廳 (西式)"
+  },
+  {
+    "index": 42,
+    "row": "ら行",
+    "hira": "ろ",
+    "kata": "ロ",
+    "romaji": "ro",
+    "origin": "平假名源自「呂」之草書；片假名源自「呂」之上方口。",
+    "mnemonic": "長得像數字『3』，尾巴不打結，一路順風（ro）！",
+    "sound_tip": "舌尖輕彈發 lo。",
+    "vocab": "ろく (roku)",
+    "vocab_tw": "數字六"
+  },
+  {
+    "index": 43,
+    "row": "わ行",
+    "hira": "わ",
+    "kata": "ワ",
+    "romaji": "wa",
+    "origin": "平假名源自「和」之草書；片假名源自「和」之口旁。",
+    "mnemonic": "大白鵝伸長脖子哇（wa）一聲！",
+    "sound_tip": "圓唇滑向元音 a 發 wa（哇）。",
+    "vocab": "わたし (watashi)",
+    "vocab_tw": "我"
+  },
+  {
+    "index": 44,
+    "row": "わ行",
+    "hira": "を",
+    "kata": "ヲ",
+    "romaji": "wo (o)",
+    "origin": "平假名源自「遠」之草書；片假名源自「井」之初筆。",
+    "mnemonic": "一個人在雪地空中飛躍，哇喔（wo）一聲！",
+    "sound_tip": "只作為受詞助詞使用，現代發音同『お (o)』。",
+    "vocab": "みず を のむ (mizu o nomu)",
+    "vocab_tw": "喝水"
+  },
+  {
+    "index": 45,
+    "row": "わ行",
+    "hira": "ん",
+    "kata": "ン",
+    "romaji": "n",
+    "origin": "平假名源自「无」之草書；片假名源自「尓」之草書。",
+    "mnemonic": "長得像英文字母『n』，發出鼻音『嗯（n）』！",
+    "sound_tip": "鼻音撥音，在日語中佔一整拍！",
+    "vocab": "にほん (nihon)",
+    "vocab_tw": "日本"
+  }
+];
+
+    let currentIndex = 0;
+    let isPlaying = false;
+    let intervalTimer = null;
+    let voiceEnabled = true;
+    let isShuffle = false;
+    let filterRow = 'all';
+
+    // Elements
+    const badgeRow = document.getElementById('badge-row');
+    const counter = document.getElementById('counter');
+    const hira = document.getElementById('hira');
+    const kata = document.getElementById('kata');
+    const romaji = document.getElementById('romaji');
+    const origin = document.getElementById('origin');
+    const mnemonic = document.getElementById('mnemonic');
+    const tip = document.getElementById('tip');
+    const vocab = document.getElementById('vocab');
+    const progress = document.getElementById('progress');
+
+    const btnPlay = document.getElementById('btn-play');
+    const btnPrev = document.getElementById('btn-prev');
+    const btnNext = document.getElementById('btn-next');
+    const btnVoice = document.getElementById('btn-voice');
+    const btnShuffle = document.getElementById('btn-shuffle');
+    const selectRow = document.getElementById('select-row');
+    const selectSpeed = document.getElementById('select-speed');
+
+    function getFilteredIndices() {
+      if (filterRow === 'all') {
+        return KANA_CARDS.map((_, i) => i);
+      }
+      const start = parseInt(filterRow, 10);
+      let count = 5;
+      if (start === 35) count = 3; // ya
+      if (start === 38) count = 5; // ra
+      if (start === 43) count = 3; // wa
+      return Array.from({ length: count }, (_, i) => start + i);
+    }
+
+    function renderCard(index) {
+      const card = KANA_CARDS[index];
+      if (!card) return;
+
+      badgeRow.textContent = card.row;
+      counter.textContent = `${index + 1} / ${KANA_CARDS.length}`;
+      hira.textContent = card.hira;
+      kata.textContent = card.kata;
+      romaji.textContent = card.romaji;
+      origin.textContent = card.origin;
+      mnemonic.textContent = card.mnemonic;
+      tip.textContent = card.sound_tip;
+      vocab.innerHTML = `<span class="vocab-highlight">${card.vocab}</span> — ${card.vocab_tw}`;
+
+      const pct = ((index + 1) / KANA_CARDS.length) * 100;
+      progress.style.width = `${pct}%`;
+
+      if (voiceEnabled) {
+        speakKana(card.hira);
+      }
+    }
+
+    function speakKana(text) {
+      if (!('speechSynthesis' in window)) return;
+      window.speechSynthesis.cancel();
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = 'ja-JP';
+      utter.rate = 0.85;
+      utter.pitch = 1.0;
+      window.speechSynthesis.speak(utter);
+    }
+
+    function nextCard() {
+      const indices = getFilteredIndices();
+      if (isShuffle) {
+        currentIndex = indices[Math.floor(Math.random() * indices.length)];
+      } else {
+        const pos = indices.indexOf(currentIndex);
+        if (pos === -1 || pos >= indices.length - 1) {
+          currentIndex = indices[0];
+        } else {
+          currentIndex = indices[pos + 1];
+        }
+      }
+      renderCard(currentIndex);
+    }
+
+    function prevCard() {
+      const indices = getFilteredIndices();
+      const pos = indices.indexOf(currentIndex);
+      if (pos <= 0) {
+        currentIndex = indices[indices.length - 1];
+      } else {
+        currentIndex = indices[pos - 1];
+      }
+      renderCard(currentIndex);
+    }
+
+    function togglePlay() {
+      isPlaying = !isPlaying;
+      if (isPlaying) {
+        btnPlay.textContent = '⏸️';
+        btnPlay.classList.add('toggle-active');
+        startTimer();
+      } else {
+        btnPlay.textContent = '▶️';
+        btnPlay.classList.remove('toggle-active');
+        clearInterval(intervalTimer);
+      }
+    }
+
+    function startTimer() {
+      clearInterval(intervalTimer);
+      const speed = parseInt(selectSpeed.value, 10) || 4000;
+      intervalTimer = setInterval(() => {
+        nextCard();
+      }, speed);
+    }
+
+    // Event Listeners
+    btnPlay.addEventListener('click', togglePlay);
+    btnNext.addEventListener('click', () => {
+      nextCard();
+      if (isPlaying) startTimer();
+    });
+    btnPrev.addEventListener('click', () => {
+      prevCard();
+      if (isPlaying) startTimer();
+    });
+
+    btnVoice.addEventListener('click', () => {
+      voiceEnabled = !voiceEnabled;
+      btnVoice.textContent = voiceEnabled ? '🔊' : '🔇';
+      if (voiceEnabled) speakKana(KANA_CARDS[currentIndex].hira);
+    });
+
+    btnShuffle.addEventListener('click', () => {
+      isShuffle = !isShuffle;
+      btnShuffle.classList.toggle('toggle-active', isShuffle);
+    });
+
+    selectRow.addEventListener('change', (e) => {
+      filterRow = e.target.value;
+      const indices = getFilteredIndices();
+      currentIndex = indices[0];
+      renderCard(currentIndex);
+      if (isPlaying) startTimer();
+    });
+
+    selectSpeed.addEventListener('change', () => {
+      if (isPlaying) startTimer();
+    });
+
+    hira.addEventListener('click', () => {
+      speakKana(KANA_CARDS[currentIndex].hira);
+    });
+
+    // Keyboard Shortcuts
+    document.addEventListener('keydown', (e) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        togglePlay();
+      } else if (e.code === 'ArrowRight') {
+        nextCard();
+        if (isPlaying) startTimer();
+      } else if (e.code === 'ArrowLeft') {
+        prevCard();
+        if (isPlaying) startTimer();
+      }
+    });
+
+    // Init
+    renderCard(0);
+  </script>
+</body>
+</html>

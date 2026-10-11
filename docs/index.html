@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>日語學習道場</title>
+  <meta name="description" content="從五十音到旅遊、生活、職場的日語學習網站：闖關、測驗、角色扮演、動漫台詞與 J-POP 跟唱。">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌸</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#/">🌸 日語<span>學習道場</span></a>
+      <span class="stat-pill" id="statPill"></span>
+      <button class="icon-btn" id="themeBtn" title="切換深色/淺色" aria-label="切換深色/淺色">🌓</button>
+    </div>
+    <nav class="nav" id="nav"></nav>
+  </header>
+  <main id="app"></main>
+  <div class="toast hidden" id="toast"></div>
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

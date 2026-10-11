@@ -1,0 +1,22 @@
+.env
+venv/
+__pycache__/
+*.pyc
+*.log
+
+# 個人學習進度（含 Discord 使用者 ID）
+user_progress.json
+bot.err
+
+# 版權音樂片段（網頁改用 iTunes 官方試聽連結）
+data/music_clips/*.m4a
+
+# 測試/產出的大型媒體檔
+*.wav
+*.mp4
+test_*.mp3
+test_font.png
+
+# J-POP 歌詞與導讀語音（版權內容，僅供本機 Discord bot 使用，不公開）
+data/lyrics_data.py
+data/guide_clips/
