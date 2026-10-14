@@ -2541,7 +2541,7 @@ window.JP_DATA = {
    "romaji": "Nozomi-gō no shiteiseki o ichimai onegaishimasu.",
    "phonetic": "【 諾 走 米 溝 諾、喜 貼 衣 ㄙㄟ ㄎㄧ 歐、一 起 買、歐 內 嘎 衣 喜 媽 斯 】",
    "mnemonic_story": "🚅 **口訣故事**：\n走到 JR 綠色窗口 (みどりの窓口)，想買東京到京都最快的希望號對號座，\n直接說：**「のぞみ号の指定席を1枚お願いします」**，\n想要靠窗座位還可以加上：『窓側 (まどがわ / Madogawa) で』！",
-   "card_image": "assets/cards/card_kore_kudasai.jpg",
+   "card_image": "",
    "meaning": "One reserved seat ticket for the Nozomi train, please.（請給我一張希望號的指定席車票。）",
    "scenario": "在 JR 綠色窗口或售票機購買新幹線或特急對號座車票。",
    "quiz": {
@@ -2565,7 +2565,7 @@ window.JP_DATA = {
    "romaji": "Zutsūyaku to kazegusuri wa doko ni arimasu ka?",
    "phonetic": "【 租 茲 壓 庫、偷、卡 賊 固 酥 哩、哇、多 口 逆、阿里媽斯嘎 】",
    "mnemonic_story": "💊 **口訣故事**：\n逛街吹風突然頭痛發燒，走進大國藥妝或松本清，\n問店員：**「頭痛薬はどこですか？」**\n店員立刻帶你找到 EVE 或大正感冒微粒！",
-   "card_image": "assets/cards/card_kore_kudasai.jpg",
+   "card_image": "",
    "meaning": "Where are the headache pills and cold medicines?（請問頭痛藥和感冒藥在哪裡？）",
    "scenario": "日本旅遊突發著涼或偏頭痛時，在藥妝店快速找到合適成藥。",
    "quiz": {
@@ -2589,7 +2589,7 @@ window.JP_DATA = {
    "romaji": "Karakuchi no nihonshu de osusume wa arimasu ka?",
    "phonetic": "【 卡 拉 庫 起 諾、逆 轟 秀、得、歐 酥 酥 妹 哇、阿里媽斯嘎 】",
    "mnemonic_story": "🍶 **口訣故事**：\n居酒屋喝完啤酒，想來杯道地日本地酒，\n問居酒屋老闆：**「辛口の日本酒でおすすめはありますか？」**\n老闆一聽就知道你是行家，立刻拿出鎮店私藏獺祭或十四代！",
-   "card_image": "assets/cards/card_kore_kudasai.jpg",
+   "card_image": "",
    "meaning": "Do you have any recommendations for dry Japanese sake?（請問有推薦偏不甜、辛口的日本酒嗎？）",
    "scenario": "在居酒屋或居酒屋專門店品嚐地道日本清酒。",
    "quiz": {
@@ -2613,7 +2613,7 @@ window.JP_DATA = {
    "romaji": "Taiwan made eamēru de okuritai desu.",
    "phonetic": "【 台 灣、媽 得、欸 阿 美 魯 得、歐 庫 哩 踏 衣 得 斯 】",
    "mnemonic_story": "📮 **口訣故事**：\n買了精美風景明信片，走進紅色標誌的日本郵局 (郵便局)，\n跟櫃台說：**「台湾までエアメールで送りたいです」**，\n付大約 100 日圓貼上限定郵票，就能將回憶寄回台灣！",
-   "card_image": "assets/cards/card_kore_kudasai.jpg",
+   "card_image": "",
    "meaning": "I would like to send this to Taiwan by airmail.（我想用航空便寄到台灣。）",
    "scenario": "在日本郵局購買郵票、寄送明信片或寄送特產紀念品回家。",
    "quiz": {
@@ -2637,7 +2637,7 @@ window.JP_DATA = {
    "romaji": "Netsu ga atte, nodo ga totemo itai desu.",
    "phonetic": "【 內 茲 嘎、阿 貼、諾 多 嘎、透 貼 摸、衣 踏 衣 得 斯 】",
    "mnemonic_story": "🏥 **口訣故事**：\n旅遊途中身體抱恙看診，見到醫生指著喉嚨：\n**「熱があって、喉がとても痛いです」**，\n醫生聽了立刻為你開立退燒消炎藥水！",
-   "card_image": "assets/cards/card_kore_kudasai.jpg",
+   "card_image": "",
    "meaning": "I have a fever, and my throat hurts very much.（我發燒了，而且喉嚨非常痛。）",
    "scenario": "在耳鼻喉科或內科診所掛號看診時清楚表達生理症狀。",
    "quiz": {
@@ -2661,7 +2661,7 @@ window.JP_DATA = {
    "romaji": "Kore o shichaku shite mite mo ii desu ka?",
    "phonetic": "【 口 咧 歐、喜 洽 庫、喜 貼、米 貼 摸、衣 衣 得 斯 嘎 】",
    "mnemonic_story": "🛍️ **口訣故事**：\n在 GU 或 LUMINE 挑中一件好看的大衣，\n日本試衣間前一定要先問店員：\n**「これを試着してみてもいいですか？」**，\n店員會微笑遞給你防弄髒妝容的白色面罩並引導進更衣室！",
-   "card_image": "assets/cards/card_kore_kudasai.jpg",
+   "card_image": "",
    "meaning": "May I try this on?（請問我可以試穿看看這件嗎？）",
    "scenario": "服飾店進試衣間前禮貌詢問店員。",
    "quiz": {
@@ -2685,7 +2685,7 @@ window.JP_DATA = {
    "romaji": "Tōkyō-eki no Yaesu-guchi made onegaishimasu.",
    "phonetic": "【 偷 ㄎㄧㄡ 欸 ㄎㄧ 諾、壓 欸 酥 姑 起、媽 得、歐 內 嘎 衣 喜 媽 斯 】",
    "mnemonic_story": "🚕 **口訣故事**：\n大包小包行李搭計程車，上車後司機回頭詢問，\n你直接說：**「〇〇までお願いします」**，\n司機立刻俐落開車，直達目的地！",
-   "card_image": "assets/cards/card_kore_kudasai.jpg",
+   "card_image": "",
    "meaning": "To the Yaesu exit of Tokyo Station, please.（請載我到東京車站的八重洲出口。）",
    "scenario": "趕飛機、深夜錯過電車或攜帶大型行李搭計程車。",
    "quiz": {
@@ -2709,7 +2709,7 @@ window.JP_DATA = {
    "romaji": "Mōningu setto no hotto kōhī de.",
    "phonetic": "【 摸 寧 估、ㄙㄟ 偷 諾、火 偷、口 喜 得 】",
    "mnemonic_story": "☕ **口訣故事**：\n早上 9 點走進復古喫茶店（如 Komeda 客美多），\n指著晨間菜單說：**「モーニングセット、ホットコーヒーで！」**，\n點一杯香濃咖啡，立刻免費贈送香脆厚片吐司與現煮水煮蛋！",
-   "card_image": "assets/cards/card_kore_kudasai.jpg",
+   "card_image": "",
    "meaning": "The morning set with hot coffee, please.（請給我晨間套餐搭配熱咖啡。）",
    "scenario": "在日本自由行早晨享受道地喫茶店早餐文化。",
    "quiz": {
@@ -2733,7 +2733,7 @@ window.JP_DATA = {
    "romaji": "Itsumo taihen osewa ni natte orimasu.",
    "phonetic": "【 一 茲 摸、太 嘿 恩、歐 ㄙㄟ 哇 逆、哪 貼、歐 哩 媽 斯 】",
    "mnemonic_story": "💼 **口訣故事**：\n接起日本客戶或廠商的電話，\n開口第一句永遠是：\n**「いつも大変お世話になっております」**，\n展現最專業、得體的商業交流素養！",
-   "card_image": "assets/cards/card_kore_kudasai.jpg",
+   "card_image": "",
    "meaning": "Thank you very much for your continuous support.（一直以來承蒙您的悉心照顧與關照。）",
    "scenario": "日商職場接聽電話、發送商務 Email 或拜訪客戶的第一句開場白。",
    "quiz": {
@@ -2757,7 +2757,7 @@ window.JP_DATA = {
    "romaji": "Okagesama de, Nihon ga daisuki ni narimashita!",
    "phonetic": "【 歐 卡 給 撒 媽 得、逆 轟 嘎、代 酥 ㄎㄧ 逆、哪 哩 媽 喜 他 】",
    "mnemonic_story": "🎓 **大圓滿口訣故事**：\n從五十音零基礎，到能點餐、問路、看懂菜單、應對生活，\n你微笑對著日本朋友說：\n**「おかげさまで、日本が大好きになりました！」**\n這就是語言最美麗的意義——帶你走進全新的世界！",
-   "card_image": "assets/cards/card_quest10_arigatou.jpg",
+   "card_image": "",
    "meaning": "Thanks to your kindness, I have grown to love Japan very much!（多虧了大家的關照，讓我超級喜歡日本！）",
    "scenario": "旅程結尾向日本友人、民宿老闆或自己宣布日語學習大圓滿達成！",
    "quiz": {

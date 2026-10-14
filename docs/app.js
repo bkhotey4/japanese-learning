@@ -21,7 +21,15 @@
   const shuffle = (a) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
   const pick = (a) => a[Math.floor(Math.random() * a.length)];
   const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
-  const dayIndex = () => Math.floor(Date.now() / 86400000);
+  const dayIndex = () => { const d = new Date(); return Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000); };
+
+  // 換頁時自動失效的計時器與事件監聽，避免舊頁面的程式在新頁面上執行
+  let pageGen = 0;
+  const pageCleanups = [];
+  const later = (fn, ms) => { const g = pageGen; setTimeout(() => { if (g === pageGen) fn(); }, ms); };
+  function onPage(target, type, fn) { target.addEventListener(type, fn); pageCleanups.push(() => target.removeEventListener(type, fn)); }
+  function newPageSession() { pageGen++; pageCleanups.splice(0).forEach((f) => f()); }
+  const lockOptions = (root) => root.querySelectorAll(".option").forEach((x) => { x.disabled = true; });
 
   function toast(msg) {
     const t = document.getElementById("toast");
@@ -154,17 +162,31 @@
     P.days = P.days || [];
     if (!P.days.includes(t)) { P.days.push(t); save(); }
     unlock("first_step");
-    if (P.streak >= 3) unlock("badge_streak_3");
-    if (P.streak >= 7) unlock("badge_streak_7");
+    const run = consecutiveDays();
+    if (run >= 3) unlock("badge_streak_3");
+    if (run >= 7) unlock("badge_streak_7");
     const wd = new Date().getDay();
     if (wd === 0 || wd === 6) unlock("badge_weekend");
   }
+  // 連續學習天數（從今天或昨天往回數，中斷就重算）
+  function consecutiveDays() {
+    const days = new Set(P.days || []);
+    const d = new Date();
+    if (!days.has(todayStr())) d.setDate(d.getDate() - 1);
+    let n = 0;
+    for (;;) {
+      const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      if (!days.has(k)) return n;
+      n++; d.setDate(d.getDate() - 1);
+    }
+  }
+  const QUEST_N = () => Object.keys(D.quests).length;
   function completeLevel(n) {
     if (!P.completed.includes(n)) P.completed.push(n);
-    if (P.level === n && n < 20) P.level = n + 1;
+    if (P.level === n && n < QUEST_N()) P.level = n + 1;
     save();
-    if (P.completed.length >= 10) unlock("badge_quest_master");
-    if (P.completed.length >= 20) unlock("badge_quest_20");
+    if (P.completed.length >= Math.min(10, QUEST_N())) unlock("badge_quest_master");
+    if (P.completed.length >= QUEST_N()) unlock("badge_quest_20");
   }
   function addMistake(q) {
     if (!P.mistakes.some((m) => m.question === q.question)) {
@@ -210,7 +232,7 @@
 
   /* ---------------- 頁面 ---------------- */
   const NAV = [
-    ["", "🏠 首頁"], ["daily", "🗓️ 挑戰"], ["cards", "🃏 單字卡"], ["quest", "⚔️ 闖關"], ["kana", "🔤 五十音"], ["quiz", "🎯 測驗"],
+    ["", "🏠 首頁"], ["daily", "🗓️ 挑戰"], ["cards", "🃏 單字卡"], ["quest", "⚔️ 闖關"], ["kana", "🔤 五十音"], ["hobi", "👨‍🏫 何博士課"], ["quiz", "🎯 測驗"],
     ["talk", "🍜 會話"], ["grammar", "🧩 文法"], ["speak", "🗣️ 跟讀"], ["travel", "✈️ 旅遊"],
     ["anime", "🎌 動漫"], ["songs", "🎐 童謡"], ["news", "📰 新聞"], ["plan", "📋 計畫"], ["me", "👑 我的"],
   ];
@@ -264,8 +286,8 @@
       <p class="lead">每天 15 分鐘，從五十音到日本自由行、生活與職場。進度存在這台裝置的瀏覽器裡。</p>` : onboardingHTML()}
       <a class="card link daily-cta" href="#/daily" style="margin:16px 0">
         <div class="spread"><div><h2 style="margin:0">🗓️ 今日挑戰 ${todayStr().slice(5).replace("-", "/")}</h2>
-          <div class="small muted">全站同一組 5 題・3 分鐘・做完可以分享成績</div></div>
-          <span class="btn ${done ? "" : "primary"}">${done ? `${done.marks} ${done.score}/5` : "開始挑戰 ➡️"}</span></div></a>
+          <div class="small muted">每天一組新題目・3 分鐘</div></div>
+          <span class="btn ${done ? "" : "primary"}">${done ? `${done.marks} ${done.score}/${done.total || 5}` : "開始挑戰 ➡️"}</span></div></a>
       ${(() => { const n = dueCount(); return `<a class="card link" href="#/cards${n ? "/study" : ""}" style="margin-bottom:16px">
         <div class="spread"><div><h2 style="margin:0">🃏 單字卡複習</h2><div class="small muted">${n ? `今天有 ${n} 張要練，大約 ${Math.max(1, Math.round(n * 0.15))} 分鐘` : "今天的卡片都練完了 🎉"}</div></div>
         <span class="btn ${n ? "primary" : ""}">${n ? "開始 ➡️" : "查看牌組"}</span></div></a>`; })()}
@@ -282,8 +304,8 @@
         </div>
         <div class="card">
           <h2>⚔️ 繼續闖關</h2>
-          <p class="muted small">第 ${P.level} / 20 關</p>
-          <div class="progress"><div style="width:${(P.completed.length / 20) * 100}%"></div></div>
+          <p class="muted small">第 ${P.level} / ${QUEST_N()} 關</p>
+          <div class="progress"><div style="width:${(P.completed.length / QUEST_N()) * 100}%"></div></div>
           <p style="margin-top:12px"><b>${esc(next.title)}</b></p>
           <div class="jp">${esc(next.phrase)}</div>
           <div class="row" style="margin-top:12px"><a class="btn primary" href="#/quest/${P.level}">開始今天的關卡 ➡️</a></div>
@@ -324,7 +346,7 @@
   };
 
   // ===== 每日挑戰：同一天全站同一組題目，可分享成績 =====
-  const SITE_URL = "https://bkhotey4.github.io/japanese-learning/";
+  const SITE_URL = location.origin + location.pathname;
   function seededRandom(seedStr) {
     let h = 1779033703 ^ seedStr.length;
     for (let i = 0; i < seedStr.length; i++) { h = Math.imul(h ^ seedStr.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); }
@@ -363,8 +385,8 @@
     for (let i = 0; i < 35; i++) {
       const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
       const res = (P.dailyResults || {})[k];
-      const lvl = res ? (res.score >= 4 ? 3 : 2) : days.has(k) ? 1 : 0;
-      cells.push(`<div class="heat l${lvl}" title="${k}${res ? ` 挑戰 ${res.score}/5` : days.has(k) ? " 有學習" : ""}"></div>`);
+      const lvl = res ? (res.score >= (res.total || 5) * 0.8 ? 3 : 2) : days.has(k) ? 1 : 0;
+      cells.push(`<div class="heat l${lvl}" title="${k}${res ? ` 挑戰 ${res.score}/${res.total || 5}` : days.has(k) ? " 有學習" : ""}"></div>`);
       d.setDate(d.getDate() + 1);
     }
     return `<div class="heatmap">${cells.join("")}</div><div class="small muted" style="margin-top:6px">最近 5 週：淺色＝有學習，深色＝完成每日挑戰</div>`;
@@ -373,18 +395,21 @@
     const date = todayStr();
     P.dailyResults = P.dailyResults || {};
     const done = P.dailyResults[date];
-    $app.innerHTML = `<h1>🗓️ 今日挑戰</h1><p class="lead">${date.replace(/-/g, "/")}・全站同一組 5 題，每天只能挑戰一次，做完把成績分享給朋友！</p>
+    $app.innerHTML = `<h1>🗓️ 今日挑戰</h1><p class="lead">${date.replace(/-/g, "/")}・每天一組新題目，只能挑戰一次，中途離開下次會接著做。</p>
       <div class="card" id="dc" style="max-width:760px"></div>
       <div class="card" style="max-width:760px;margin-top:14px"><div class="spread"><h2>📅 學習紀錄</h2><span>🔥 連續挑戰 <b>${dailyStreak()}</b> 天</span></div>${heatmapHTML()}</div>`;
     const el = document.getElementById("dc");
     if (done) return showDailyResult(el, date, done);
     const qs = dailyQuestions(date);
-    const marks = [];
-    let i = 0;
+    // 進行中的作答存起來，離開再回來會接續，不能重抽
+    const prog = P.dailyProgress && P.dailyProgress.date === date ? P.dailyProgress : (P.dailyProgress = { date, marks: [] });
+    const marks = prog.marks;
+    let i = marks.length;
     const next = () => {
       if (i >= qs.length) {
         const score = marks.filter((m) => m === "⭕").length;
-        P.dailyResults[date] = { score, marks: marks.join("") };
+        P.dailyResults[date] = { score, total: qs.length, marks: marks.join("") };
+        delete P.dailyProgress;
         save();
         activity();
         unlock("badge_quiz");
@@ -393,7 +418,7 @@
       const q = qs[i++];
       mountQuiz(el, q, {
         trackMistake: !q.kana,
-        onDone: (ok) => marks.push(ok ? "⭕" : "❌"),
+        onDone: (ok) => { marks.push(ok ? "⭕" : "❌"); save(); },
         onNext: next,
         nextLabel: i === qs.length ? "看結果 🎉" : "下一題 ➡️",
       });
@@ -403,10 +428,11 @@
     next();
   };
   function showDailyResult(el, date, r) {
-    const msg = r.score === 5 ? "🌸 全對！太強了！" : r.score >= 4 ? "👏 很棒！差一點就全對" : r.score >= 2 ? "💪 不錯，明天再來！" : "🌱 每天一點點，明天一定更好！";
-    const text = `🌸 日語學習道場 每日挑戰 ${date.slice(5).replace("-", "/")}\n${r.marks} ${r.score}/5\n🔥 連續挑戰 ${dailyStreak()} 天\n一起來學日語 👉 ${SITE_URL}#/daily`;
+    const total = r.total || 5, ratio = r.score / total;
+    const msg = ratio === 1 ? "🌸 全對！太強了！" : ratio >= 0.8 ? "👏 很棒！差一點就全對" : ratio >= 0.4 ? "💪 不錯，明天再來！" : "🌱 每天一點點，明天一定更好！";
+    const text = `🌸 日語學習道場 每日挑戰 ${date.slice(5).replace("-", "/")}\n${r.marks} ${r.score}/${total}\n🔥 連續挑戰 ${dailyStreak()} 天\n一起來學日語 👉 ${SITE_URL}#/daily`;
     el.innerHTML = `<div style="text-align:center"><div style="font-size:2.4rem;letter-spacing:4px">${r.marks}</div>
-        <div class="jp-big">${r.score} / 5</div><p><b>${msg}</b></p>
+        <div class="jp-big">${r.score} / ${total}</div><p><b>${msg}</b></p>
         <pre class="share-text">${esc(text)}</pre>
         <div class="row" style="justify-content:center"><button class="btn primary" id="shareBtn">📤 分享成績</button>
         <a class="btn" href="#/review">🔄 複習錯題</a><a class="btn" href="#/quest">⚔️ 繼續闖關</a></div>
@@ -425,13 +451,13 @@
     if (arg) return questLevel(Number(arg));
     $app.innerHTML = `
       <h1>⚔️ 系統化闖關</h1>
-      <p class="lead">20 關，一關一句核心句型 + 五十音 + 隨堂測驗。答對即可解鎖下一關。</p>
+      <p class="lead">${QUEST_N()} 關，一關一句核心句型 + 五十音 + 隨堂測驗。答對即可解鎖下一關。</p>
       <div class="card">
-        <div class="spread"><b>已完成 ${P.completed.length} / 20</b>
+        <div class="spread"><b>已完成 ${P.completed.length} / ${QUEST_N()}</b>
           <button class="btn small" id="resetQuest">↺ 重置進度</button></div>
-        <div class="progress" style="margin:10px 0 16px"><div style="width:${(P.completed.length / 20) * 100}%"></div></div>
+        <div class="progress" style="margin:10px 0 16px"><div style="width:${(P.completed.length / QUEST_N()) * 100}%"></div></div>
         <div class="level-grid">
-          ${Array.from({ length: 20 }, (_, i) => i + 1).map((n) => {
+          ${Object.values(D.quests).map((q) => q.level).map((n) => {
             const cls = P.completed.includes(n) ? "done" : n === P.level ? "current" : n > P.level ? "locked" : "";
             return `<a class="level ${cls}" ${n > P.level ? "" : `href="#/quest/${n}"`} title="${esc(D.quests[n].title)}">${P.completed.includes(n) ? "✓" : n}</a>`;
           }).join("")}
@@ -477,177 +503,254 @@
       <div class="card" style="margin-top:14px"><h2>📝 隨堂測驗</h2><div id="qz"></div></div>`;
     mountQuiz(document.getElementById("qz"), q.quiz, {
       onDone: (ok) => {
-        if (!ok) return;
+        if (!ok) {
+          const fb = document.querySelector("#qz .fb");
+          fb.insertAdjacentHTML("beforeend", `<div class="row" style="margin-top:10px"><button class="btn primary" id="retryQ">🔁 再試一次</button></div>`);
+          document.getElementById("retryQ").addEventListener("click", () => questLevel(n));
+          return;
+        }
         completeLevel(n);
         const fb = document.querySelector("#qz .fb");
         fb.insertAdjacentHTML("beforeend", `<div class="row" style="margin-top:10px">
-          ${n < 20 ? `<a class="btn primary" href="#/quest/${n + 1}">🎉 前往第 ${n + 1} 關 ➡️</a>` : `<b>🎓 恭喜全 20 關大圓滿！</b>`}
+          ${n < QUEST_N() ? `<a class="btn primary" href="#/quest/${n + 1}">🎉 前往第 ${n + 1} 關 ➡️</a>` : `<b>🎓 恭喜全 ${QUEST_N()} 關大圓滿！</b>`}
           <a class="btn" href="#/quest">關卡列表</a></div>`);
       },
     });
   }
 
   // ===== 五十音（/kana、/kana_game、/write、/kana_loop） =====
-  /* ---------------- 何博士（何必日語）五十音學習法 ---------------- */
-  const HOBI = {
-    channel: "https://www.youtube.com/channel/UCZ5Wn4ss81cVKSk74Duv2BA",
-    resources: "https://www.yes588.com.tw/%E4%BD%95%E5%8D%9A%E5%A3%AB%E5%88%86%E4%BA%AB%E8%B3%87%E6%96%99%E5%BA%AB/",
-    playlist: "PLQK-Nv0UKQOfxIDflD8znoUFUJ5gNpGYW",
-    fastPlaylist: "PLQK-Nv0UKQOfI3HqOP1o2Zyh1XcW4gDTg",
-    videos: [
-      ["rJSv48e7nUw", "五十音從頭完整慢慢學（非速成版）"],
-      ["V7Qf7Xl9JSs", "學完五十音一定要會這四個字"],
-      ["mGtzF06cMq4", "學完五十音之後背單字最快的方法"],
-    ],
+  /* ---------------- 何博士五十音課：重點講解 + 互動練習（內容由 data/hobi_course.py 匯出） ---------------- */
+  const HOBI = () => D.hobi || { title: "何博士五十音課", intro: "", lessons: [] };
+  const hobiDone = () => (P.hobiDone = P.hobiDone || {});
+
+  pages.hobi = (arg) => {
+    const C = HOBI();
+    const lesson = C.lessons.find((l) => l.id === arg);
+    if (lesson) return hobiLesson(lesson);
+    const done = hobiDone();
+    const n = C.lessons.filter((l) => done[l.id]).length;
+    const next = C.lessons.find((l) => !done[l.id]);
+    $app.innerHTML = `<h1>👨‍🏫 ${esc(C.title)}</h1>
+      <div class="card md" style="margin-bottom:14px">${md(C.intro)}</div>
+      <div class="card" style="margin-bottom:14px">
+        <div class="spread"><b>已完成 ${n} / ${C.lessons.length} 課</b>
+          ${next ? `<a class="btn primary" href="#/hobi/${esc(next.id)}">${n ? "繼續上課" : "開始第一課"} ➡️</a>` : "<b>🎓 全部完成！</b>"}</div>
+        <div class="progress" style="margin-top:10px"><div style="width:${C.lessons.length ? (n / C.lessons.length) * 100 : 0}%"></div></div>
+      </div>
+      <div class="stack">${C.lessons.map((l, i) => `
+        <a class="card link" href="#/hobi/${esc(l.id)}"><div class="spread">
+          <div><span class="small muted">第 ${i + 1} 課・約 ${l.minutes || 5} 分鐘</span><br><b>${esc(l.icon || "📘")} ${esc(l.title)}</b></div>
+          <span>${done[l.id] ? "✅" : "▶"}</span></div></a>`).join("")}</div>`;
   };
-  const VOWELS = ["a", "i", "u", "e", "o"];
-  const DAN = { a: "あ段", i: "い段", u: "う段", e: "え段", o: "お段" };
-  const kanaRowList = () => Object.values(D.kanaRows);
-  const vowelOf = (romaji) => { const r = romaji.split(" ")[0]; return r === "n" ? null : r.slice(-1); };
 
-  function hobiPage() {
-    const H = (P.hobi = Object.assign({ seqBest: 0, coord: 0, written: 0 }, P.hobi));
-    const heads = kanaRowList().map((r) => r.items[0].hira); // あかさたなはまやらわ
-    $app.innerHTML = `<p><a href="#/kana">← 五十音</a></p>
-      <h1>👨‍🏫 何博士五十音學習法</h1>
-      <p class="lead">結合 <a href="${HOBI.channel}" target="_blank" rel="noopener">何必日語・何必博士</a> 的五十音教學重點：
-        <b>先背直行、再背橫行、一定要用寫的、不用全背熟就進第一課</b>。影片與習字帖版權屬何必日語所有，本頁只做練習工具。</p>
+  function hobiLesson(l) {
+    const C = HOBI();
+    const idx = C.lessons.indexOf(l);
+    const nextL = C.lessons[idx + 1];
+    activity();
+    $app.innerHTML = `<p><a href="#/hobi">← 課程目錄</a></p>
+      <div class="small muted">第 ${idx + 1} / ${C.lessons.length} 課</div>
+      <h1>${esc(l.icon || "📘")} ${esc(l.title)}</h1>
+      <div class="card"><h2>📖 重點</h2><div class="stack">${l.points.map((p) => `<div class="box md">${md(p)}</div>`).join("")}</div></div>
+      <div class="card" style="margin-top:14px"><div class="spread"><h2>✏️ 練習</h2><span class="small muted" id="drillStep"></span></div><div id="drill"></div></div>`;
+    const el = document.getElementById("drill");
+    let i = 0;
+    const next = () => {
+      if (i >= l.drills.length) {
+        hobiDone()[l.id] = true;
+        save();
+        el.innerHTML = `<div style="text-align:center"><div style="font-size:2.4rem">🎉</div><h2>這一課完成了！</h2>
+          <div class="row" style="justify-content:center">
+            ${nextL ? `<a class="btn primary" href="#/hobi/${esc(nextL.id)}">下一課：${esc(nextL.title)} ➡️</a>` : `<a class="btn primary" href="#/quest/1">🎓 課程完成，去闖第 1 關 ➡️</a>`}
+            <a class="btn" href="#/hobi">課程目錄</a></div></div>`;
+        document.getElementById("drillStep").textContent = "";
+        return;
+      }
+      const d = l.drills[i++];
+      document.getElementById("drillStep").textContent = `${i} / ${l.drills.length}`;
+      (DRILLS[d.type] || DRILLS.unknown)(el, d, next);
+    };
+    next();
+  }
 
-      <div class="card"><h2>STEP 1　🎬 先看何博士怎麼教</h2>
-        <div class="video"><iframe src="https://www.youtube-nocookie.com/embed/${HOBI.videos[0][0]}?list=${HOBI.playlist}" title="何必日語 五十音播放清單" loading="lazy" allowfullscreen
-          allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture"></iframe></div>
-        <div class="row" style="margin-top:10px"><a class="chip" href="https://www.youtube.com/playlist?list=${HOBI.playlist}" target="_blank" rel="noopener">📺 五十音播放清單</a>${HOBI.videos.map(([id, t]) => `<a class="chip" href="https://www.youtube.com/watch?v=${id}" target="_blank" rel="noopener">▶ ${t}</a>`).join("")}</div>
-        <div class="row" style="margin-top:10px">
-          <a class="btn small" href="https://www.youtube.com/playlist?list=${HOBI.fastPlaylist}" target="_blank" rel="noopener">⚡ 五十音速成播放清單</a>
-          <a class="btn small" href="${HOBI.resources}" target="_blank" rel="noopener">📄 何博士習字帖 PDF（官方資料庫）</a></div>
-        <p class="small muted">影片無法播放時，請點上方連結到 YouTube 觀看。</p></div>
+  // 每種練習：(容器, 題目資料, 完成後呼叫的 done)
+  const doneBtn = (label = "完成，下一個練習 ➡️") => `<div class="row" style="margin-top:14px"><button class="btn primary" data-done>${label}</button></div>`;
+  const bindDone = (el, done) => el.querySelector("[data-done]").addEventListener("click", done, { once: true });
+  const DRILLS = {
+    unknown: (el, d, done) => done(),
 
-      <div class="card" style="margin-top:14px"><div class="spread"><h2>STEP 2　⬇️ 先背直行</h2><span class="small muted">最佳連對：${H.seqBest}</span></div>
-        <p class="small">每一行的第一個字連起來念，像背口訣一樣念到順口：</p>
-        <div class="row" style="gap:6px">${heads.map((k) => `<span class="kana-cell" style="padding:6px 10px"><span class="k" style="font-size:1.6rem">${k}</span></span>`).join("")}
-          ${speakBtn(heads.join("、"), "🔊 跟著念")}</div>
-        <div id="seq" style="margin-top:12px"></div></div>
+    choice: (el, d, done) => mountQuiz(el, d, { onNext: done, nextLabel: "下一個練習 ➡️" }),
 
-      <div class="card" style="margin-top:14px"><div class="spread"><h2>STEP 3　➡️ 再背橫行，用座標找假名</h2><span class="small muted">答對：${H.coord}</span></div>
-        <p class="small">每一行都照「<b>あ・い・う・え・お</b>」的母音順序排。記住直行（子音）＋橫行（母音），任何假名都找得到。例如 <b>か行 × う段 = く</b>。</p>
-        <div class="table-wrap"><table class="kana-matrix" id="matrix"><tr><th></th>${VOWELS.map((v) => `<th>${DAN[v]}</th>`).join("")}</tr>
-          ${kanaRowList().map((r, ri) => `<tr><th>${r.items[0].hira}行</th>${VOWELS.map((v) => {
-            const it = r.items.find((x) => vowelOf(x.romaji) === v);
-            return `<td data-cell="${ri}-${v}" class="jp">${it ? it.hira : ""}</td>`;
-          }).join("")}</tr>`).join("")}</table></div>
-        <div class="row" style="margin:8px 0"><label class="small"><input type="checkbox" id="hideMatrix"> 遮住表格（考自己）</label></div>
-        <div id="coord"></div></div>
+    // 聽辨：念 a 或 b，選出聽到的是哪一個
+    listen: (el, d, done) => {
+      const rounds = shuffle(d.pairs).slice(0, 6);
+      let r = 0, right = 0;
+      const round = () => {
+        if (r >= rounds.length) {
+          el.innerHTML = `<div class="feedback ${right === rounds.length ? "ok" : "bad"}"><b>聽辨結果：${right} / ${rounds.length}</b></div>${doneBtn()}`;
+          return bindDone(el, done);
+        }
+        const p = rounds[r++];
+        const pickA = Math.random() < 0.5;
+        const target = pickA ? p.a : p.b;
+        el.innerHTML = `<div class="md">${md(d.prompt)}</div>
+          <div class="row" style="margin:12px 0"><button class="btn" id="again">🔊 再聽一次</button><button class="btn" id="slow">🐢 慢速</button><span class="small muted">第 ${r} / ${rounds.length} 題</span></div>
+          <div class="options">${[["a", p.a, p.a_note], ["b", p.b, p.b_note]].map(([k, w, n]) => `
+            <button class="option" data-k="${k}" style="text-align:center"><span class="jp" style="font-size:1.4rem">${esc(w)}</span><br><span class="small muted">${esc(n)}</span></button>`).join("")}</div>
+          <div class="fb"></div>`;
+        later(() => speak(target), 250);
+        el.querySelector("#again").addEventListener("click", () => speak(target));
+        el.querySelector("#slow").addEventListener("click", () => speak(target, 0.5));
+        el.querySelectorAll(".option").forEach((b) => b.addEventListener("click", () => {
+          lockOptions(el);
+          const ok = (b.dataset.k === "a") === pickA;
+          if (ok) right++;
+          el.querySelector(`[data-k="${pickA ? "a" : "b"}"]`).classList.add("correct");
+          if (!ok) b.classList.add("wrong");
+          activity();
+          el.querySelector(".fb").innerHTML = `<div class="feedback ${ok ? "ok" : "bad"}">${ok ? "⭕ 聽對了！" : `❌ 念的是「${esc(target)}」`}
+            <div class="row" style="margin-top:8px">${speakBtn(p.a, "🔊 " + esc(p.a))}${speakBtn(p.b, "🔊 " + esc(p.b))}</div></div>
+            <div class="row" style="margin-top:10px"><button class="btn primary" id="nr">下一題 ➡️</button></div>`;
+          el.querySelector("#nr").addEventListener("click", round);
+        }));
+      };
+      round();
+    },
 
-      <div class="card" style="margin-top:14px"><div class="spread"><h2>STEP 4　✍️ 一定要用寫的</h2><span class="small muted">已寫 ${H.written} 字</span></div>
-        <p class="small">何博士強調：假名是「圖形」，<b>用手寫就像畫圖，記得最快</b>。照著淡色字描，再遮住字自己寫一次。有紙筆的話，搭配上面的習字帖效果更好。</p>
-        <div class="row" style="margin-bottom:8px"><select id="wRow" style="width:auto">${kanaRowList().map((r, i) => `<option value="${i}">${esc(r.name)}</option>`).join("")}</select>
-          <label class="small"><input type="checkbox" id="wHide"> 遮住範本</label></div>
-        <div class="row" id="wPick" style="gap:6px;margin-bottom:8px"></div>
-        <div class="write-wrap"><canvas id="wCanvas" width="320" height="320"></canvas></div>
+    // 開口念：每一句都可以聽、念、評分
+    say: (el, d, done) => {
+      el.innerHTML = `<div class="md">${md(d.prompt)}</div><div class="stack" style="margin-top:12px">${d.items.map((it) => `
+        <div class="box"><div class="spread"><span class="jp" style="font-size:1.25rem">${esc(it.jp)}</span><span class="small">${esc(it.meaning)}</span></div>
+          <div class="furi">${esc(it.reading)}</div>${it.tip ? `<div class="small muted md">${md(it.tip)}</div>` : ""}
+          <div class="row" style="margin-top:8px">${speakBtn(it.jp, "🔊 聽")}<button class="btn small speak" data-speak="${esc(it.jp)}" data-rate="0.55">🐢 慢速</button>${micBtn(it.jp, it.reading)}</div></div>`).join("")}</div>
+        ${SR ? "" : `<p class="small muted">（這個瀏覽器不支援語音評分，請跟著 🔊 大聲念 3 次）</p>`}${doneBtn("念完了，下一個練習 ➡️")}`;
+      bindDone(el, done);
+    },
+
+    // 補順序：藏起一格，選出缺的
+    order: (el, d, done) => {
+      const seq = d.sequence;
+      let r = 0, streak = 0;
+      const total = Math.min(5, seq.length);
+      const round = () => {
+        if (r >= total) {
+          el.innerHTML = `<div class="feedback ok"><b>順序練好了！連對 ${streak} 題</b><div class="jp" style="font-size:1.3rem;margin-top:6px">${seq.map(esc).join("・")}</div></div>${doneBtn()}`;
+          return bindDone(el, done);
+        }
+        r++;
+        const hide = Math.floor(Math.random() * seq.length);
+        const opts = shuffle([seq[hide], ...shuffle(seq.filter((_, j) => j !== hide)).slice(0, 3)]);
+        el.innerHTML = `<div class="md">${md(d.prompt)}</div>
+          <div class="jp" style="font-size:1.6rem;letter-spacing:6px;margin:12px 0">${seq.map((k, j) => (j === hide ? "＿" : esc(k))).join(" ")}</div>
+          <div class="small muted">第 ${r} / ${total} 題・缺了哪一個？</div>
+          <div class="options">${opts.map((o) => `<button class="option jp" style="text-align:center;font-size:1.3rem">${esc(o)}</button>`).join("")}</div>`;
+        el.querySelectorAll(".option").forEach((b) => b.addEventListener("click", () => {
+          lockOptions(el);
+          activity();
+          if (b.textContent === seq[hide]) { streak++; b.classList.add("correct"); speak(seq[hide]); later(round, 600); }
+          else { streak = 0; b.classList.add("wrong"); toast(`答案是「${seq[hide]}」`); later(round, 1300); }
+        }));
+      };
+      round();
+    },
+
+    // 描寫：何博士說假名是「圖」，要用寫的才記得
+    write: (el, d, done) => {
+      el.innerHTML = `<div class="md">${md(d.prompt)}</div>
+        <div class="row" id="wPick" style="gap:6px;margin:10px 0"></div>
+        <label class="small"><input type="checkbox" id="wHide"> 遮住範本，憑記憶寫</label>
+        <div class="write-wrap" style="margin-top:8px"><canvas id="wCanvas" width="320" height="320"></canvas></div>
         <div class="row" style="margin-top:8px;justify-content:center">
-          <button class="btn" id="wClear">🧽 擦掉</button><button class="btn" id="wSay">🔊 發音</button><button class="btn primary" id="wNext">寫好了，下一個 ➡️</button></div></div>
+          <button class="btn" id="wClear">🧽 擦掉</button><button class="btn" id="wSay">🔊 發音</button><button class="btn primary" id="wNext">寫好了 ➡️</button></div>`;
+      mountWriter(el, d.kana, done);
+    },
 
-      <div class="card" style="margin-top:14px"><h2>STEP 5　🚀 不用全背熟，直接開始</h2>
-        <p class="small">何博士的建議：五十音大致熟悉就進第一課，在學單字、句子的過程中自然會記牢。</p>
-        <div class="row"><a class="btn primary" href="#/quest/1">⚔️ 進入第 1 關</a><a class="btn" href="#/cards">🃏 五十音單字卡</a><a class="btn" href="#/kana/game">🎮 五十音消除遊戲</a></div></div>`;
+    // 何博士的背單字法：聽日文 → 說中文；看中文 → 說日文
+    recall: (el, d, done) => {
+      const items = d.items;
+      let i = 0, phase = 1;
+      const show = () => {
+        if (i >= items.length) {
+          if (phase === 1) { phase = 2; i = 0; }
+          else { el.innerHTML = `<div class="feedback ok"><b>兩個方向都練完了！</b><div class="small">何博士的建議：每天用聽的反覆過幾次，不要用寫的背單字。</div></div>${doneBtn()}`; return bindDone(el, done); }
+        }
+        const it = items[i];
+        const head = `<div class="md">${md(d.prompt)}</div><div class="small muted" style="margin:8px 0">${phase === 1 ? "第一輪：聽日文 → 心裡說出中文" : "第二輪：看中文 → 開口說日文"}・${i + 1} / ${items.length}</div>`;
+        if (phase === 1) {
+          el.innerHTML = `${head}<div style="text-align:center;margin:16px 0"><button class="btn" id="rePlay">🔊 再聽一次</button></div>
+            <div id="rv" style="text-align:center"><button class="btn primary" id="reveal">想好中文了，看答案</button></div>`;
+          later(() => speak(it.jp), 250);
+          el.querySelector("#rePlay").addEventListener("click", () => speak(it.jp));
+        } else {
+          el.innerHTML = `${head}<div style="text-align:center;font-size:1.4rem;margin:16px 0"><b>${esc(it.meaning)}</b></div>
+            <div class="row" style="justify-content:center">${micBtn(it.jp)}</div>
+            <div id="rv" style="text-align:center;margin-top:10px"><button class="btn primary" id="reveal">說完了，看答案</button></div>`;
+        }
+        el.querySelector("#reveal").addEventListener("click", () => {
+          activity();
+          el.querySelector("#rv").innerHTML = `<div class="box"><div class="jp" style="font-size:1.4rem">${esc(it.jp)} ${speakBtn(it.jp)}</div><div>${esc(it.meaning)}</div></div>
+            <div class="row" style="justify-content:center;margin-top:10px"><button class="btn primary" id="rn">下一個 ➡️</button></div>`;
+          if (phase === 2) speak(it.jp);
+          el.querySelector("#rn").addEventListener("click", () => { i++; show(); });
+        });
+      };
+      show();
+    },
+  };
 
-    // STEP 2：直行順序測驗（挖掉一格，選出缺的字）
-    let streak = 0;
-    const seqQ = () => {
-      const i = Math.floor(Math.random() * heads.length);
-      const opts = shuffle([heads[i], ...shuffle(heads.filter((_, j) => j !== i)).slice(0, 3)]);
-      const el = document.getElementById("seq");
-      el.innerHTML = `<div class="small muted">缺了哪一個？（連對 ${streak}）</div>
-        <div class="jp" style="font-size:1.6rem;letter-spacing:6px">${heads.map((k, j) => (j === i ? "＿" : k)).join(" ")}</div>
-        <div class="options">${opts.map((o) => `<button class="option jp" style="text-align:center;font-size:1.3rem">${o}</button>`).join("")}</div>`;
-      el.querySelectorAll(".option").forEach((b) => b.addEventListener("click", () => {
-        activity();
-        if (b.textContent === heads[i]) {
-          streak++; b.classList.add("correct"); speak(heads[i]);
-          if (streak > H.seqBest) { H.seqBest = streak; save(); }
-          setTimeout(seqQ, 500);
-        } else { streak = 0; b.classList.add("wrong"); toast(`答案是「${heads[i]}」，順序：${heads.join("")}`); setTimeout(seqQ, 1200); }
-      }));
-    };
-    seqQ();
-
-    // STEP 3：座標測驗（〇行 × 〇段 = ?）
-    const cells = kanaRowList().flatMap((r, ri) => r.items.filter((x) => vowelOf(x.romaji)).map((x) => ({ ...x, ri, v: vowelOf(x.romaji), head: r.items[0].hira })));
-    const matrix = document.getElementById("matrix");
-    document.getElementById("hideMatrix").addEventListener("change", (e) => matrix.classList.toggle("hidden-kana", e.target.checked));
-    const coordQ = () => {
-      const c = pick(cells);
-      const near = cells.filter((x) => x.hira !== c.hira && (x.ri === c.ri || x.v === c.v));
-      const opts = shuffle([c.hira, ...shuffle(near).slice(0, 3)].map((x) => x.hira || x));
-      const el = document.getElementById("coord");
-      el.innerHTML = `<div class="jp" style="font-size:1.3rem">${c.head}行 × ${DAN[c.v]} ＝ ？</div>
-        <div class="options">${opts.map((o) => `<button class="option jp" style="text-align:center;font-size:1.3rem">${o}</button>`).join("")}</div>`;
-      matrix.querySelectorAll("td").forEach((td) => td.classList.remove("hl"));
-      el.querySelectorAll(".option").forEach((b) => b.addEventListener("click", () => {
-        activity();
-        matrix.querySelector(`[data-cell="${c.ri}-${c.v}"]`).classList.add("hl");
-        if (b.textContent === c.hira) { b.classList.add("correct"); H.coord++; save(); speak(c.hira); setTimeout(coordQ, 700); }
-        else { b.classList.add("wrong"); toast(`${c.head}行 × ${DAN[c.v]} 是「${c.hira}」(${c.romaji})`); setTimeout(coordQ, 1600); }
-      }));
-    };
-    coordQ();
-
-    // STEP 4：米字格描寫
-    const cv = document.getElementById("wCanvas"), ctx = cv.getContext("2d");
-    let row = 0, idx = 0, drawing = false, last = null;
+  // 米字格描寫板（在 el 裡找 #wCanvas 等元素）
+  function mountWriter(el, kanaList, done) {
+    const cv = el.querySelector("#wCanvas"), ctx = cv.getContext("2d");
+    let idx = 0, drawing = false, last = null, written = 0;
     const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-    const drawGuide = () => {
-      const s = cv.width, k = kanaRowList()[row].items[idx];
+    const pick = el.querySelector("#wPick"), hide = el.querySelector("#wHide");
+    pick.innerHTML = kanaList.map((k, i) => `<button class="chip jp" data-i="${i}">${esc(k)}</button>`).join("");
+    const guide = () => {
+      const s = cv.width, k = kanaList[idx];
       ctx.clearRect(0, 0, s, s);
       ctx.strokeStyle = css("--border"); ctx.lineWidth = 1; ctx.setLineDash([6, 6]);
       ctx.beginPath(); ctx.moveTo(s / 2, 0); ctx.lineTo(s / 2, s); ctx.moveTo(0, s / 2); ctx.lineTo(s, s / 2);
       ctx.moveTo(0, 0); ctx.lineTo(s, s); ctx.moveTo(s, 0); ctx.lineTo(0, s); ctx.stroke(); ctx.setLineDash([]);
-      if (!document.getElementById("wHide").checked) {
+      if (!hide.checked) {
         ctx.fillStyle = css("--muted"); ctx.globalAlpha = 0.22;
         ctx.font = `700 ${s * 0.78}px "Zen Maru Gothic","Yu Gothic",sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        ctx.fillText(k.hira, s / 2, s / 2 + s * 0.04); ctx.globalAlpha = 1;
+        ctx.fillText(k, s / 2, s / 2 + s * 0.04); ctx.globalAlpha = 1;
       }
-      document.querySelectorAll("#wPick .chip").forEach((c, i) => c.classList.toggle("active", i === idx));
+      pick.querySelectorAll(".chip").forEach((c, i) => c.classList.toggle("active", i === idx));
     };
-    const renderPick = () => {
-      document.getElementById("wPick").innerHTML = kanaRowList()[row].items.map((k, i) => `<button class="chip jp" data-i="${i}">${k.hira}</button>`).join("");
-      document.querySelectorAll("#wPick .chip").forEach((c) => c.addEventListener("click", () => { idx = Number(c.dataset.i); drawGuide(); }));
-      drawGuide();
-    };
-    const pos = (e) => { const r = cv.getBoundingClientRect(), p = e.touches ? e.touches[0] : e; return [(p.clientX - r.left) * (cv.width / r.width), (p.clientY - r.top) * (cv.height / r.height)]; };
-    const start = (e) => { e.preventDefault(); drawing = true; last = pos(e); };
-    const move = (e) => {
-      if (!drawing) return; e.preventDefault();
+    const pos = (e) => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * (cv.width / r.width), (e.clientY - r.top) * (cv.height / r.height)]; };
+    cv.addEventListener("pointerdown", (e) => { e.preventDefault(); drawing = true; last = pos(e); });
+    cv.addEventListener("pointermove", (e) => {
+      if (!drawing) return;
       const p = pos(e);
       ctx.strokeStyle = css("--accent"); ctx.lineWidth = 12; ctx.lineCap = "round"; ctx.lineJoin = "round";
       ctx.beginPath(); ctx.moveTo(...last); ctx.lineTo(...p); ctx.stroke(); last = p;
-    };
-    const end = () => { drawing = false; };
-    cv.addEventListener("pointerdown", start); cv.addEventListener("pointermove", move);
-    cv.addEventListener("pointerup", end); cv.addEventListener("pointerleave", end);
-    document.getElementById("wRow").addEventListener("change", (e) => { row = Number(e.target.value); idx = 0; renderPick(); });
-    document.getElementById("wHide").addEventListener("change", drawGuide);
-    document.getElementById("wClear").addEventListener("click", drawGuide);
-    document.getElementById("wSay").addEventListener("click", () => speak(kanaRowList()[row].items[idx].hira));
-    document.getElementById("wNext").addEventListener("click", () => {
-      activity(); H.written++; save();
-      const items = kanaRowList()[row].items;
-      if (idx < items.length - 1) idx++;
-      else { row = (row + 1) % kanaRowList().length; idx = 0; document.getElementById("wRow").value = row; renderPick(); toast("👏 這一行寫完了！換下一行"); }
-      drawGuide(); speak(kanaRowList()[row].items[idx].hira);
     });
-    renderPick();
+    ["pointerup", "pointerleave"].forEach((t) => cv.addEventListener(t, () => { drawing = false; }));
+    pick.querySelectorAll(".chip").forEach((c) => c.addEventListener("click", () => { idx = Number(c.dataset.i); guide(); }));
+    hide.addEventListener("change", guide);
+    el.querySelector("#wClear").addEventListener("click", guide);
+    el.querySelector("#wSay").addEventListener("click", () => speak(kanaList[idx]));
+    el.querySelector("#wNext").addEventListener("click", () => {
+      activity(); written++;
+      P.written = (P.written || 0) + 1; save();
+      if (idx < kanaList.length - 1) { idx++; guide(); speak(kanaList[idx]); return; }
+      toast(`👏 寫完 ${kanaList.length} 個字了！`);
+      if (done) done();
+      else { idx = 0; guide(); }
+    });
+    guide();
   }
 
   pages.kana = (arg) => {
     if (arg === "game") return kanaGame();
-    if (arg === "hobi") return hobiPage();
+    if (arg === "hobi") { location.hash = "#/hobi"; return; }
     if (arg !== undefined && arg !== "") return kanaCard(Number(arg));
     $app.innerHTML = `
       <h1>🔤 五十音</h1>
       <p class="lead">點任一假名看字源、記憶口訣與發音技巧。</p>
       <div class="row" style="margin-bottom:16px">
-        <a class="btn primary" href="#/kana/hobi">👨‍🏫 何博士學習法</a>
+        <a class="btn primary" href="#/hobi">👨‍🏫 何博士五十音課</a>
         <a class="btn" href="#/kana/game">🎮 五十音消除遊戲</a>
         <a class="btn" href="kana_player.html">🌸 語音循環播放器</a>
         <a class="btn" href="handwriting.html">✍️ 米字格手寫板</a>
@@ -709,10 +812,11 @@
         <div class="fb"></div>`;
       el.querySelectorAll(".option").forEach((b) => b.addEventListener("click", () => {
         activity();
+        lockOptions(el);
         if (b.textContent === c[field]) {
           combo += 1; round += 1; speak(c.hira);
           b.classList.add("correct");
-          setTimeout(next, 450);
+          later(next, 450);
         } else {
           combo = 0;
           el.querySelectorAll(".option").forEach((x) => { x.disabled = true; if (x.textContent === c[field]) x.classList.add("correct"); });
@@ -733,7 +837,7 @@
     const all = [...D.quiz, ...D.katakanaQuizzes.map((q) => ({ ...q, category: "片假名外來語" }))];
     const cats = [...new Set(all.map((q) => q.category))];
     const cat = arg ? decodeURIComponent(arg) : "";
-    const pool = cat ? all.filter((q) => q.category === cat) : all;
+    const pool = cat && all.some((q) => q.category === cat) ? all.filter((q) => q.category === cat) : all;
     $app.innerHTML = `
       <h1>🎯 隨堂測驗</h1>
       <p class="lead">答錯的題目會自動收進 <a href="#/review">錯題本</a>。</p>
@@ -896,12 +1000,11 @@
       show();
     };
     const onKey = (e) => {
-      if (!document.getElementById("fc")) { document.removeEventListener("keydown", onKey); return; }
       if (e.target.closest && e.target.closest("input, textarea, select, button")) return;
       if (e.code === "Space" || e.key === "Enter") { e.preventDefault(); flipped ? rate(2) : flip(); }
       else if (/^[1-4]$/.test(e.key)) rate(Number(e.key) - 1);
     };
-    document.addEventListener("keydown", onKey);
+    onPage(document, "keydown", onKey);
     show();
   }
 
@@ -946,18 +1049,20 @@
         <div class="romaji">${esc(w.romaji)}</div><p><b>${esc(w.meaning)}</b> <span class="small muted">← ${esc(w.origin)}</span></p>
         <div class="small md">${md(w.note)}</div></div>`).join("")}</div>`).join("") +
         `<p style="margin-top:14px"><a class="btn primary" href="#/quiz/${encodeURIComponent("片假名外來語")}">🎯 片假名小測驗</a></p>`;
-    } else {
+    } else if (D.scenarios[tab]) {
       const s = D.scenarios[tab];
       body = `<p class="muted">${esc(s.description)}</p><div class="grid">${s.phrases.map((p) => `
         <div class="card"><div class="spread"><span class="jp" style="font-size:1.2rem">${esc(p.japanese)}</span>${speakBtn(p.japanese)}</div>
         <div class="furi">${esc(p.furigana)}</div><div class="romaji">${esc(p.romaji)}</div>
         <p><b>${esc(p.meaning)}</b></p><div class="small muted md">${md(p.usage)}</div>${SR ? `<div class="row" style="margin-top:8px">${micBtn(p.japanese, p.furigana)}</div>` : ""}</div>`).join("")}</div>`;
     }
+    else return pages.talk("roleplay");
     $app.innerHTML = `<h1>🍜 情境會話</h1><p class="lead">先學句子，再到角色扮演實戰。</p>
       <div class="row" style="margin-bottom:14px">${tabs.map(([k, t]) => `<a class="chip ${k === tab ? "active" : ""}" href="#/talk/${k}">${esc(t)}</a>`).join("")}</div>${body}`;
   };
   function roleplay(id) {
     const r = D.roleplay[id];
+    newPageSession(); // 「再玩一次」直接呼叫時，也要停掉上一輪的計時器
     activity();
     $app.innerHTML = `<p><a href="#/talk">← 情境會話</a></p><h1>${esc(r.title)}</h1><p class="lead">${esc(r.description)}</p>
       <div class="card" style="max-width:760px"><div class="chat" id="chat"></div><div id="choices" style="margin-top:14px"></div></div>`;
@@ -971,16 +1076,17 @@
       choices.innerHTML = `<div class="small muted">👇 選一句大聲念出來回覆：</div><div class="options">${s.options.map((o, i) => `
         <button class="option" data-i="${i}"><b>${esc(o.label)}</b><br><span class="small romaji">${esc(o.romaji)}</span></button>`).join("")}</div>`;
       choices.querySelectorAll(".option").forEach((b) => b.addEventListener("click", () => {
+        lockOptions(choices);
         const o = s.options[Number(b.dataset.i)];
         say("me", `<span class="jp">${esc(o.furigana)}</span><div class="small">${esc(o.meaning)}</div>`);
         speak(o.furigana);
-        if (o.npc_reaction) setTimeout(() => say("npc", `<span class="small">${esc(o.npc_reaction)}</span>`), 300);
+        if (o.npc_reaction) later(() => say("npc", `<span class="small">${esc(o.npc_reaction)}</span>`), 300);
         if (o.next_step === "end" || o.next_step >= r.steps.length) {
           choices.innerHTML = `<div class="feedback ok"><b>🎉 實戰通關！</b> ${D.badges[r.badge] ? `獲得成就 ${esc(D.badges[r.badge].name)}` : ""}</div>
             <div class="row" style="margin-top:10px"><button class="btn primary" id="replay">🔁 再玩一次</button><a class="btn" href="#/talk">其他情境</a></div>`;
           document.getElementById("replay").addEventListener("click", () => roleplay(id));
           unlock(r.badge);
-        } else setTimeout(() => step(o.next_step), 900);
+        } else later(() => step(o.next_step), 900);
       }));
     };
     step(0);
@@ -1019,9 +1125,8 @@
         <div class="furi">${esc(s.furigana)}</div><div class="romaji">${esc(s.romaji)}</div>
         <p><b>${esc(s.meaning)}</b></p><div class="small md box">${md(s.pitch_tip)}</div>
         <div class="row" style="margin-top:10px">${speakBtn(s.sentence, "🔊 正常")}<button class="btn small speak" data-speak="${esc(s.sentence)}" data-rate="0.55">🐢 慢速</button>${micBtn(s.sentence, s.furigana)}</div></div>`).join("")}</div>`;
-    unlock("badge_shadowing");
     const info = () => { const el = document.getElementById("voiceInfo"); if (el) el.textContent = jaVoice ? `使用語音：${jaVoice.name}` : "⚠️ 找不到日語語音，請在系統安裝日語語音套件，或改用 Edge / Chrome。"; };
-    info(); setTimeout(info, 800);
+    info(); later(info, 800);
     document.getElementById("ttsGo").addEventListener("click", () => { activity(); speak(document.getElementById("ttsText").value); });
     const tm = document.getElementById("ttsMic");
     if (tm) tm.addEventListener("click", () => { tm.dataset.mic = document.getElementById("ttsText").value; });
@@ -1186,7 +1291,7 @@
     const acc = P.answered ? Math.round((P.correct / P.answered) * 100) : 0;
     $app.innerHTML = `<h1>👑 我的學習檔案</h1>
       <div class="grid tight" style="margin-bottom:16px">
-        ${[["🔥", P.streak, "累積學習天數"], ["⚔️", `${P.completed.length}/20`, "已通關"], ["🎯", `${acc}%`, `答題正確率 (${P.answered} 題)`], ["🔄", P.mistakes.length, "待複習錯題"], ["🗓️", dailyStreak(), "連續每日挑戰"], ["🎤", P.micBest ? `${P.micBest} 分` : "—", `最佳發音 (${P.micTries || 0} 次)`], ["🃏", Object.keys(P.srs || {}).length, `學過的單字卡 (複習 ${P.srsReviews || 0} 次)`]]
+        ${[["🔥", P.streak, `累積學習天數（連續 ${consecutiveDays()} 天）`], ["⚔️", `${P.completed.length}/${QUEST_N()}`, "已通關"], ["🎯", `${acc}%`, `答題正確率 (${P.answered} 題)`], ["🔄", P.mistakes.length, "待複習錯題"], ["🗓️", dailyStreak(), "連續每日挑戰"], ["🎤", P.micBest ? `${P.micBest} 分` : "—", `最佳發音 (${P.micTries || 0} 次)`], ["🃏", Object.keys(P.srs || {}).length, `學過的單字卡 (複習 ${P.srsReviews || 0} 次)`]]
           .map(([e, v, t]) => `<div class="card"><div class="emoji">${e}</div><div style="font-size:1.6rem;font-weight:700">${v}</div><div class="small muted">${t}</div></div>`).join("")}
       </div>
       <div class="card" style="margin-bottom:16px"><div class="spread"><h2>📅 學習紀錄</h2>
@@ -1205,7 +1310,13 @@
     document.getElementById("exp").onclick = () => { io.classList.remove("hidden"); go.classList.add("hidden"); io.value = btoa(unescape(encodeURIComponent(JSON.stringify(P)))); io.select(); toast("已產生備份碼，請複製保存"); };
     document.getElementById("imp").onclick = () => { io.classList.remove("hidden"); go.classList.remove("hidden"); io.value = ""; io.placeholder = "貼上備份碼"; };
     go.onclick = () => {
-      try { P = Object.assign(blank(), JSON.parse(decodeURIComponent(escape(atob(io.value.trim()))))); save(); toast("✅ 匯入成功"); route(); }
+      try {
+        const data = JSON.parse(decodeURIComponent(escape(atob(io.value.trim()))));
+        if (!data || typeof data !== "object" || !Array.isArray(data.badges || []) || !Array.isArray(data.mistakes || [])) throw new Error("bad");
+        P = Object.assign(blank(), data);
+        if (P.goal && !GOALS[P.goal]) P.goal = null;
+        save(); toast("✅ 匯入成功"); route();
+      }
       catch { toast("❌ 備份碼格式錯誤"); }
     };
     document.getElementById("wipe").onclick = () => { if (confirm("確定清除全部學習進度？此動作無法復原。")) { P = blank(); save(); route(); } };
@@ -1214,8 +1325,9 @@
   /* ---------------- 路由 ---------------- */
   function route() {
     if ("speechSynthesis" in window) speechSynthesis.cancel();
+    newPageSession();
     const [name = "", arg] = location.hash.replace(/^#\/?/, "").split("/");
-    const page = pages[name] || pages[""];
+    const page = Object.prototype.hasOwnProperty.call(pages, name) ? pages[name] : pages[""];
     document.getElementById("nav").innerHTML = NAV.map(([k, t]) =>
       `<a href="#/${k}" class="${k === name || (name === "review" && k === "quiz") ? "active" : ""}">${t}</a>`).join("");
     const active = document.querySelector(".nav a.active");

@@ -20,3 +20,9 @@ test_font.png
 # J-POP 歌詞與導讀語音（版權內容，僅供本機 Discord bot 使用，不公開）
 data/lyrics_data.py
 data/guide_clips/
+
+# 本機版「日語遊樂園」：含 J-POP 歌詞與音樂，不公開
+arcade.html
+arcade_data.js
+arcade_data.json
+/index.html

@@ -16,6 +16,10 @@ sys.path.insert(0, str(ROOT))
 from data.anime_data import ANIME_QUOTES
 from data.culture_data import CULTURE_TOPICS
 from data.doyo_data import DOYO_SONGS
+try:
+    from data.hobi_course import HOBI_COURSE
+except ImportError:
+    HOBI_COURSE = None
 from data.grammar_data import TE_FORM_MNEMONIC, VERB_CONJUGATIONS
 from data.kana_data import KANA_ROWS, ALL_KANA_CARDS
 from data.katakana_data import KATAKANA_WORDS, KATAKANA_QUIZZES
@@ -39,7 +43,7 @@ def literal_from_bot(name: str):
     for node in tree.body:
         if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == name for t in node.targets):
             return ast.literal_eval(node.value)
-    return {}
+    raise SystemExit(f"找不到 bot.py 裡的 {name}，請確認資料還在（網頁的對應功能會變空白）")
 
 
 def copy_asset(src_rel: str, dest_dir: str) -> str:
@@ -56,10 +60,21 @@ def copy_asset(src_rel: str, dest_dir: str) -> str:
 
 
 def main():
+    # 清掉舊素材，避免刪除或改名的圖卡殘留在網站上
+    shutil.rmtree(DOCS / "assets" / "cards", ignore_errors=True)
+
+    # 同一張圖卡被多關共用時（例如 11～20 關暫用第 1 關圖卡），只保留給檔名對得上的那一關，
+    # 其他關不顯示，避免出現跟內容無關的圖卡
+    usage = {}
+    for q in QUESTS.values():
+        usage.setdefault(q.get("card_image", ""), []).append(q["level"])
     quests = {}
     for k, q in QUESTS.items():
         q = dict(q)
-        q["card_image"] = copy_asset(q.get("card_image", ""), "cards")
+        img = q.get("card_image", "")
+        if len(usage.get(img, [])) > 1 and f"quest{q['level']}_" not in img:
+            img = ""
+        q["card_image"] = copy_asset(img, "cards")
         quests[str(k)] = q
 
     data = {
@@ -72,6 +87,7 @@ def main():
         "katakanaWords": KATAKANA_WORDS,
         "katakanaQuizzes": KATAKANA_QUIZZES,
         "doyo": DOYO_SONGS,
+        "hobi": HOBI_COURSE,
         "menu": MENU_CATEGORIES,
         "news": NHK_NEWS_ARTICLES,
         "omikuji": OMIKUJI_DATA,
