@@ -26,11 +26,31 @@ if sys.stderr is not None and hasattr(sys.stderr, "reconfigure"):
     except Exception:
         pass
 
+LOG_MAX_BYTES = 20 * 1024 * 1024  # 記錄檔超過 20 MB 就輪替成 .1（舊的 .1 會被取代）
+
+
 class DualLogger:
     def __init__(self, stream, file_path):
         self.stream = stream
         self.file_path = file_path
         self._file = None
+        self._written = 0
+
+    def _rotate_if_needed(self):
+        """檔案超過 LOG_MAX_BYTES 時改名為 .1 並重新開新檔"""
+        try:
+            size = os.path.getsize(self.file_path) if os.path.exists(self.file_path) else 0
+        except Exception:
+            return
+        if size < LOG_MAX_BYTES:
+            return
+        try:
+            if self._file is not None:
+                self._file.close()
+                self._file = None
+            os.replace(self.file_path, self.file_path + ".1")
+        except Exception:
+            pass
 
     def write(self, message):
         if self.stream:
@@ -41,9 +61,16 @@ class DualLogger:
                 pass
         try:
             if self._file is None:
+                self._rotate_if_needed()
                 self._file = open(self.file_path, "a", encoding="utf-8")
+                self._written = 0
             self._file.write(message)
             self._file.flush()
+            # 每寫入約 1 MB 檢查一次大小，避免每次都 stat 檔案
+            self._written += len(message)
+            if self._written >= 1024 * 1024:
+                self._written = 0
+                self._rotate_if_needed()
         except Exception:
             pass
 
@@ -75,6 +102,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
 import tempfile
+import uuid
 import edge_tts
 
 from data.kana_data import KANA_ROWS, ALL_KANA_CARDS, get_all_kana_cards, get_kana_card
@@ -82,12 +110,14 @@ from data.phrases_data import SCENARIOS
 from data.quiz_data import QUIZ_QUESTIONS, get_quizzes_by_category
 from data.trivia_data import JAPANESE_TRIVIA, get_random_trivia
 from data.quest_data import QUESTS
+TOTAL_QUESTS = len(QUESTS)  # 主線闖關總關數
 from data.anime_data import ANIME_QUOTES
 from data.progress_manager import (
     get_user_progress, advance_user_level, reset_user_progress,
     record_daily_activity, add_mistake, get_mistakes, remove_mistake,
     unlock_badge, BADGES_INFO, set_user_schedule, set_user_schedule_mode,
-    advance_kana_day, toggle_user_schedule, get_leaderboard
+    advance_kana_day, toggle_user_schedule, get_leaderboard,
+    get_last_push_date, set_last_push_date
 )
 from data.roleplay_data import ROLEPLAY_SCENARIOS
 from data.katakana_data import KATAKANA_WORDS, KATAKANA_QUIZZES
@@ -99,7 +129,12 @@ from data.news_data import NHK_NEWS_ARTICLES
 from data.shadowing_data import SHADOWING_DRILLS
 from data.omikuji_data import OMIKUJI_DATA, draw_omikuji
 from data.scan_data import SCAN_CATEGORIES
-from data.lyrics_data import JPOP_SONGS
+try:
+    from data.lyrics_data import JPOP_SONGS  # 此檔案未納入 git，新 clone 可能沒有
+except ImportError:
+    JPOP_SONGS = {}
+
+LYRICS_MISSING_MSG = "⚠️ 此環境未安裝 J-POP 歌詞資料（data/lyrics_data.py）。"
 
 # 載入環境變數
 load_dotenv()
@@ -112,11 +147,23 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 
 async def text_to_speech(text: str, filename: str, rate: str = "-25%", voice: str = "female") -> str:
-    path = os.path.join(tempfile.gettempdir(), filename)
+    # 每次產生唯一檔名（保留原名稱當前綴），避免多位使用者同時使用時互相覆蓋
+    stem, ext = os.path.splitext(os.path.basename(filename))
+    path = os.path.join(tempfile.gettempdir(), f"{stem}_{uuid.uuid4().hex[:12]}{ext or '.mp3'}")
     voice_id = "ja-JP-NanamiNeural" if voice == "female" else "ja-JP-KeitaNeural"
     communicate = edge_tts.Communicate(text, voice_id, rate=rate)
     await communicate.save(path)
     return path
+
+
+def remove_temp_file(path) -> None:
+    """傳送完語音後刪除暫存檔（失敗就忽略）"""
+    if not path:
+        return
+    try:
+        os.remove(path)
+    except Exception:
+        pass
 
 
 def build_kana_card_embed(idx: int) -> discord.Embed:
@@ -324,11 +371,32 @@ class KanaAutoPlayView(discord.ui.View):
             self._task = asyncio.create_task(self._auto_advance_task())
 
     async def _auto_advance_task(self):
+        # 互動 token 15 分鐘後失效：同一個互動最多編輯約 14 分鐘；暫停超過 5 分鐘也自動結束
+        MAX_TOKEN_AGE = 14 * 60
+        MAX_PAUSED = 5 * 60
+        loop = asyncio.get_running_loop()
+        token_owner = self._last_interaction
+        token_started = loop.time()
+        paused_since = None
         try:
             while not self.is_stopped:
                 await asyncio.sleep(self.speed)
-                if self.is_paused or self.is_stopped:
+                now = loop.time()
+                if self._last_interaction is not token_owner:
+                    # 使用者按了按鈕 → 拿到新的互動 token，重新計時
+                    token_owner = self._last_interaction
+                    token_started = now
+                if now - token_started > MAX_TOKEN_AGE:
+                    break
+                if self.is_paused:
+                    if paused_since is None:
+                        paused_since = now
+                    elif now - paused_since > MAX_PAUSED:
+                        break
                     continue
+                paused_since = None
+                if self.is_stopped:
+                    break
 
                 self.current_idx = (self.current_idx + 1) % len(ALL_KANA_CARDS)
                 embed = self.build_autoplay_embed()
@@ -339,13 +407,16 @@ class KanaAutoPlayView(discord.ui.View):
                             await self._last_interaction.edit_original_response(embed=embed, view=self)
                         elif hasattr(self._last_interaction, "message") and self._last_interaction.message:
                             await self._last_interaction.message.edit(embed=embed, view=self)
-                except discord.NotFound:
+                except discord.HTTPException:
+                    # 訊息被刪除、token 失效或其他 Discord API 錯誤 → 停止循環
                     break
                 except Exception as e:
                     # 避免編輯過頻或連線中斷引發報錯
                     await asyncio.sleep(2.0)
         except asyncio.CancelledError:
             pass
+        finally:
+            self.is_stopped = True
 
     async def on_pause(self, interaction: discord.Interaction):
         record_daily_activity(interaction.user.id)
@@ -362,6 +433,10 @@ class KanaAutoPlayView(discord.ui.View):
         self._refresh_buttons()
         embed = self.build_autoplay_embed()
         await interaction.response.edit_message(embed=embed, view=self)
+        # 若背景循環因暫停過久或逾時已結束，用這次的新互動重新啟動
+        if self._task is None or self._task.done():
+            self.is_stopped = False
+            self.start_loop(interaction)
 
     async def on_change_speed(self, interaction: discord.Interaction):
         record_daily_activity(interaction.user.id)
@@ -485,7 +560,7 @@ class KanaSingleQuizView(discord.ui.View):
 
             embed.add_field(
                 name="💡【好奇心日語冷知識】",
-                value=f"**{trivia['title']}**\n{trivia['content']}",
+                value=f"**{trivia['title']}**\n{trivia['story']}",
                 inline=False
             )
 
@@ -569,7 +644,7 @@ def build_daily_phrase_embed(cat_title: str, item: dict) -> discord.Embed:
     embed.add_field(name="情境與用法", value=item['usage'], inline=False)
     embed.add_field(
         name="💡【好奇心日語冷知識】",
-        value=f"**{trivia['title']}**\n{trivia['content']}",
+        value=f"**{trivia['title']}**\n{trivia['story']}",
         inline=False
     )
     embed.set_footer(text="💡 點擊下方按鈕可直接「抽下一張」或前往「從零學五十音」！")
@@ -683,7 +758,7 @@ class QuizView(discord.ui.View):
             # 附帶好奇心日語冷知識
             embed.add_field(
                 name="💡【好奇心日語冷知識】",
-                value=f"**{trivia['title']}**\n{trivia['content']}",
+                value=f"**{trivia['title']}**\n{trivia['story']}",
                 inline=False
             )
 
@@ -778,10 +853,10 @@ class QuestQuizView(discord.ui.View):
                 embed.title = f"🎉 恭喜通關【第 {self.current_level} 關】！"
                 
                 upgrade_text = ""
-                if is_new and new_level <= 20:
+                if is_new and new_level <= TOTAL_QUESTS:
                     upgrade_text = f"\n\n🚀 **等級晉升！你已解鎖【第 {new_level} 關】！**\n👉 點擊下方「➡️ 挑戰下一關」可直接連續闖關！"
-                elif self.current_level == 20:
-                    upgrade_text = "\n\n🏆 **【全 20 關大圓滿達成】恭喜完成日語自由行全套闖關！日本旅遊生存神功大成！**"
+                elif self.current_level == TOTAL_QUESTS:
+                    upgrade_text = f"\n\n🏆 **【全 {TOTAL_QUESTS} 關大圓滿達成】恭喜完成日語自由行全套闖關！日本旅遊生存神功大成！**"
 
                 embed.description += (
                     f"\n\n✅ **正確答案**：`{self.correct_answer}`\n"
@@ -790,15 +865,15 @@ class QuestQuizView(discord.ui.View):
                 )
 
                 # 下一關按鈕
-                target_lvl = self.current_level + 1 if self.current_level < 20 else 1
-                lbl = f"➡️ 挑戰下一關 (第 {target_lvl} 關)" if self.current_level < 20 else "🏆 回第 1 關複習"
+                target_lvl = self.current_level + 1 if self.current_level < TOTAL_QUESTS else 1
+                lbl = f"➡️ 挑戰下一關 (第 {target_lvl} 關)" if self.current_level < TOTAL_QUESTS else "🏆 回第 1 關複習"
                 btn_next_level = discord.ui.Button(label=lbl, style=discord.ButtonStyle.success, row=1)
                 async def on_next_quest(itx: discord.Interaction):
                     record_daily_activity(itx.user.id)
                     q = QUESTS.get(target_lvl)
                     filled = "🟩" * target_lvl
-                    unfilled = "⬜" * max(0, 20 - target_lvl)
-                    bar = f"{filled}{unfilled} (Level {target_lvl}/20)"
+                    unfilled = "⬜" * max(0, TOTAL_QUESTS - target_lvl)
+                    bar = f"{filled}{unfilled} (Level {target_lvl}/{TOTAL_QUESTS})"
                     mnemonic_sec = f"\n{q['mnemonic_story']}\n" if q.get("mnemonic_story") else ""
                     q_embed = discord.Embed(
                         title=f"⚔️ 【日語系統化闖關】{q['title']}",
@@ -849,8 +924,8 @@ class QuestQuizView(discord.ui.View):
                     record_daily_activity(itx.user.id)
                     q = QUESTS.get(self.current_level)
                     filled = "🟩" * self.current_level
-                    unfilled = "⬜" * max(0, 20 - self.current_level)
-                    bar = f"{filled}{unfilled} (Level {self.current_level}/20)"
+                    unfilled = "⬜" * max(0, TOTAL_QUESTS - self.current_level)
+                    bar = f"{filled}{unfilled} (Level {self.current_level}/{TOTAL_QUESTS})"
                     mnemonic_sec = f"\n{q['mnemonic_story']}\n" if q.get("mnemonic_story") else ""
                     q_embed = discord.Embed(
                         title=f"⚔️ 【日語系統化闖關】{q['title']}",
@@ -897,7 +972,7 @@ class QuestQuizView(discord.ui.View):
 
             embed.add_field(
                 name="💡【好奇心日語冷知識】",
-                value=f"**{trivia['title']}**\n{trivia['content']}",
+                value=f"**{trivia['title']}**\n{trivia['story']}",
                 inline=False
             )
 
@@ -1037,7 +1112,7 @@ class KatakanaQuizView(discord.ui.View):
 
             embed.add_field(
                 name="💡【好奇心日語冷知識】",
-                value=f"**{trivia['title']}**\n{trivia['content']}",
+                value=f"**{trivia['title']}**\n{trivia['story']}",
                 inline=False
             )
 
@@ -1138,7 +1213,7 @@ class ReviewQuizView(discord.ui.View):
 
             embed.add_field(
                 name="💡【好奇心日語冷知識】",
-                value=f"**{trivia['title']}**\n{trivia['content']}",
+                value=f"**{trivia['title']}**\n{trivia['story']}",
                 inline=False
             )
 
@@ -1826,6 +1901,9 @@ class DailyHubView(discord.ui.View):
 
     async def on_lyrics(self, interaction: discord.Interaction):
         record_daily_activity(interaction.user.id)
+        if not JPOP_SONGS:
+            await interaction.response.send_message(LYRICS_MISSING_MSG, ephemeral=True)
+            return
         song_key = random.choice(list(JPOP_SONGS.keys()))
         embed = build_lyrics_embed(song_key)
         view = LyricsSelectView(song_key)
@@ -1908,7 +1986,7 @@ def build_weekday_plan_embed() -> discord.Embed:
     )
     embed.add_field(
         name="💡 平日心態守則",
-        value="今天加班太累也完全沒關係！哪怕只在 Discord 裡玩 1 題 `/quiz`，只要連續打卡（Streak）不中斷，您就已經走在領先的道路上！",
+        value="今天加班太累也完全沒關係！哪怕只在 Discord 裡玩 1 題 `/quiz`，每打卡一天累積天數（Streak）就加一，您就已經走在領先的道路上！",
         inline=False
     )
     embed.set_footer(text="點擊下方按鈕可切換「假日沉浸計畫」或「全階段路線圖」！")
@@ -2021,15 +2099,29 @@ SIGN_DATABASE = {
 
 # 每日定時課程推播排程系統（支援個人化自訂時間與開關）
 TAIPEI_TZ = datetime.timezone(datetime.timedelta(hours=8))
-_last_scheduled_sent = {}
+_last_push_attempt = {}  # user_id -> 上次嘗試推播的 datetime（失敗時每 10 分鐘重試一次，避免狂刷）
+
+# 推播對象：可在 .env 設定 DISCORD_OWNER_ID，未設定時沿用原本的預設值
+try:
+    PUSH_TARGET_USER_ID = int(os.getenv("DISCORD_OWNER_ID") or 548823614900797441)
+except ValueError:
+    PUSH_TARGET_USER_ID = 548823614900797441
+
+
+def _parse_hm(hm: str, default: str) -> datetime.time:
+    try:
+        return datetime.datetime.strptime(hm, "%H:%M").time()
+    except (TypeError, ValueError):
+        return datetime.datetime.strptime(default, "%H:%M").time()
+
 
 @tasks.loop(minutes=1)
 async def scheduled_minute_checker():
     now_taipei = datetime.datetime.now(TAIPEI_TZ)
-    current_hm = now_taipei.strftime("%H:%M")
     today_str = str(now_taipei.date())
 
-    target_user_id = 548823614900797441
+    target_user_id = PUSH_TARGET_USER_ID
+    sent_any = False
     try:
         prog = get_user_progress(target_user_id)
         if not prog.get("schedule_enabled", True):
@@ -2037,8 +2129,13 @@ async def scheduled_minute_checker():
 
         is_weekend = now_taipei.weekday() >= 5
         sched_time = prog.get("schedule_weekend_time", "10:30") if is_weekend else prog.get("schedule_time", "21:00")
-        if current_hm == sched_time and _last_scheduled_sent.get(target_user_id) != today_str:
-            _last_scheduled_sent[target_user_id] = today_str
+        sched_t = _parse_hm(sched_time, "10:30" if is_weekend else "21:00")
+        # 時間已到（或已過，例如 bot 剛重啟）且今天尚未成功推播過 → 補發
+        if now_taipei.time() >= sched_t and get_last_push_date(target_user_id) != today_str:
+            last_try = _last_push_attempt.get(target_user_id)
+            if last_try and (now_taipei - last_try).total_seconds() < 600:
+                return
+            _last_push_attempt[target_user_id] = now_taipei
             user = await bot.fetch_user(target_user_id)
             if not user:
                 return
@@ -2046,9 +2143,9 @@ async def scheduled_minute_checker():
             lvl = prog.get("current_level", 1)
             q = QUESTS.get(lvl, QUESTS[1])
 
-            filled = "🟩" * min(lvl, 20)
-            unfilled = "⬜" * max(0, 20 - lvl)
-            bar = f"{filled}{unfilled} (Level {lvl}/20)"
+            filled = "🟩" * min(lvl, TOTAL_QUESTS)
+            unfilled = "⬜" * max(0, TOTAL_QUESTS - lvl)
+            bar = f"{filled}{unfilled} (Level {lvl}/{TOTAL_QUESTS})"
 
             mnemonic_sec = f"\n{q['mnemonic_story']}\n" if q.get("mnemonic_story") else ""
 
@@ -2108,6 +2205,7 @@ async def scheduled_minute_checker():
                 card_file = discord.File(card_full, filename=f"quest_lvl{lvl}_card.jpg")
                 embed.set_image(url=f"attachment://quest_lvl{lvl}_card.jpg")
 
+            voice_path = None
             try:
                 voice_path = await text_to_speech(q["phrase"], f"quest_{lvl}.mp3", rate="-25%")
                 file = discord.File(voice_path, filename=f"quest_lvl{lvl}.mp3")
@@ -2158,6 +2256,7 @@ async def scheduled_minute_checker():
                 # 生成行別代表字發音音檔
                 kana_pronounce_text = "、".join([it["hira"] for it in items])
                 kana_file = None
+                kana_voice_path = None
                 try:
                     kana_voice_path = await text_to_speech(kana_pronounce_text, f"kana_day_{kana_day}.mp3", rate="-20%")
                     kana_file = discord.File(kana_voice_path, filename=f"kana_station_{kana_day}.mp3")
@@ -2166,10 +2265,16 @@ async def scheduled_minute_checker():
 
                 hub_view = DailyHubView(current_row_key=row_key)
 
-                if kana_file:
-                    await user.send(embed=kana_embed, file=kana_file, view=hub_view)
-                else:
-                    await user.send(embed=kana_embed, view=hub_view)
+                try:
+                    if kana_file:
+                        await user.send(embed=kana_embed, file=kana_file, view=hub_view)
+                    else:
+                        await user.send(embed=kana_embed, view=hub_view)
+                finally:
+                    if kana_file:
+                        kana_file.close()
+                    remove_temp_file(kana_voice_path)
+                sent_any = True
 
                 # 推進循環站點
                 advance_kana_day(target_user_id)
@@ -2187,10 +2292,19 @@ async def scheduled_minute_checker():
                     await user.send(embed=embed, files=send_files, view=view)
                 else:
                     await user.send(embed=embed, view=view)
+                sent_any = True
                 print(f"[{datetime.datetime.now()}] 已向使用者推送 {sched_time} 微課程！", flush=True)
+            if file:
+                file.close()
+            remove_temp_file(voice_path)
+
+            # 主要課程已送達 → 記錄今日已推播（失敗時不記錄，下次檢查會自動補發）
+            set_last_push_date(target_user_id, today_str)
 
             # 3. 主動推送【今日 J-POP 經典名曲教室】（30 秒原曲音樂 ＋ 30 秒日語導讀拆字電台）
             try:
+                if not JPOP_SONGS:
+                    raise RuntimeError("此環境未安裝 J-POP 歌詞資料")
                 song_keys = list(JPOP_SONGS.keys())
                 song_idx = (prog.get("kana_day", 1) - 1) % len(song_keys)
                 today_song_key = song_keys[song_idx]
@@ -2217,6 +2331,12 @@ async def scheduled_minute_checker():
             except Exception as e:
                 print(f"主動推送 J-POP 名曲失敗: {e}", flush=True)
     except Exception as e:
+        # 若已有部分內容送達，仍視為今日已推播，避免重試時重複轟炸
+        if sent_any:
+            try:
+                set_last_push_date(target_user_id, today_str)
+            except Exception:
+                pass
         print(f"定時推送課程失敗: {e}", flush=True)
 
 
@@ -2225,12 +2345,15 @@ async def on_ready():
     print("==================================================", flush=True)
     print(f"🌸 日語學習機器人已就緒！", flush=True)
     print(f"機器人名稱: {bot.user.name} (ID: {bot.user.id})", flush=True)
-    print("正在同步斜線指令 (Slash Commands)...", flush=True)
-    try:
-        synced = await bot.tree.sync()
-        print(f"✅ 已成功同步 {len(synced)} 個全域指令！", flush=True)
-    except Exception as e:
-        print(f"❌ 同步指令時發生錯誤: {e}", flush=True)
+    # on_ready 在斷線重連時會重複觸發；斜線指令每個行程只需同步一次（避免觸發 API 速率限制）
+    if not getattr(bot, "_tree_synced", False):
+        print("正在同步斜線指令 (Slash Commands)...", flush=True)
+        try:
+            synced = await bot.tree.sync()
+            bot._tree_synced = True
+            print(f"✅ 已成功同步 {len(synced)} 個全域指令！", flush=True)
+        except Exception as e:
+            print(f"❌ 同步指令時發生錯誤: {e}", flush=True)
 
     if not scheduled_minute_checker.is_running():
         scheduled_minute_checker.start()
@@ -2239,10 +2362,29 @@ async def on_ready():
     print("==================================================", flush=True)
 
 
+def _has_live_view(interaction: discord.Interaction) -> bool:
+    """檢查這個按鈕/選單是否仍有存活中的 View 會處理（比照 discord.py ViewStore 的查找方式；取不到就當作沒有）"""
+    try:
+        store = bot._connection._view_store
+        key = (interaction.data.get("component_type"), interaction.data.get("custom_id"))
+        msg_id = interaction.message.id if interaction.message else None
+        if msg_id is not None and key in store._views.get(msg_id, {}):
+            return True
+        return key in store._views.get(None, {})
+    except Exception:
+        return False
+
+
 @bot.event
 async def on_interaction(interaction: discord.Interaction):
     """全局互動防呆接管器：防止任何舊推播或重啟後過期按鈕出現『該應用程式未及時回應』"""
     if interaction.type != discord.InteractionType.component:
+        return
+    if interaction.message is None:
+        return
+
+    # 仍有存活中的 View 會處理這個按鈕 → 交給原本的回呼，避免重複回應（40060）
+    if _has_live_view(interaction):
         return
 
     # 等待 0.3 秒，若原 View 回呼已正常回應則直接返回
@@ -2342,8 +2484,11 @@ async def on_interaction(interaction: discord.Interaction):
 
         # 6. 檢查是否為 J-POP 歌詞教室按鈕或下拉選單（支援歷史卡片與重啟後按鈕無縫接管！）
         is_lyrics_context = "J-POP" in embed_title or "歌詞" in embed_title or "名曲" in embed_title
+        if is_lyrics_context and not JPOP_SONGS:
+            await interaction.response.send_message(LYRICS_MISSING_MSG, ephemeral=True)
+            return
         if is_lyrics_context:
-            matched_song_key = "idol"
+            matched_song_key = "idol" if "idol" in JPOP_SONGS else next(iter(JPOP_SONGS))
             for sk, sdata in JPOP_SONGS.items():
                 if sdata["title"] in embed_title or sdata["artist"] in embed_desc or sk in embed_title:
                     matched_song_key = sk
@@ -2373,13 +2518,19 @@ async def on_interaction(interaction: discord.Interaction):
                         ephemeral=True
                     )
                 else:
+                    # TTS 可能超過 3 秒，先 defer 再用 followup 傳送
+                    await interaction.response.defer(ephemeral=True)
                     voice_path = await text_to_speech(song["lyrics_jp"].replace("\n", "、"), f"song_{matched_song_key}.mp3", rate="-20%")
-                    file = discord.File(voice_path, filename=f"{matched_song_key}_lyrics_slow.mp3")
-                    await interaction.response.send_message(
-                        embed=guide_embed,
-                        file=file,
-                        ephemeral=True
-                    )
+                    try:
+                        file = discord.File(voice_path, filename=f"{matched_song_key}_lyrics_slow.mp3")
+                        await interaction.followup.send(
+                            embed=guide_embed,
+                            file=file,
+                            ephemeral=True
+                        )
+                        file.close()
+                    finally:
+                        remove_temp_file(voice_path)
                 return
 
             # B. 播放原曲音樂
@@ -2424,6 +2575,9 @@ async def on_interaction(interaction: discord.Interaction):
             await interaction.response.send_message(embed=game_view.build_embed(), view=game_view, ephemeral=True)
             return
         if clicked_label == "🎵 聽 J-POP 歌詞":
+            if not JPOP_SONGS:
+                await interaction.response.send_message(LYRICS_MISSING_MSG, ephemeral=True)
+                return
             sk = random.choice(list(JPOP_SONGS.keys()))
             sdata = JPOP_SONGS[sk]
             fls = []
@@ -2445,11 +2599,17 @@ async def on_interaction(interaction: discord.Interaction):
             await interaction.response.edit_message(embed=build_omikuji_embed(new_data), view=OmikujiView(new_data))
             return
         if clicked_label == "🔊 聆聽今日箴言朗讀":
-            fortune_match = draw_omikuji()
+            # 從卡片內容找回原本抽到的籤，找不到才重新抽
+            fortune_match = next((f for f in OMIKUJI_DATA if f["quote"] in embed_desc), None) or draw_omikuji()
             phrase = f"{fortune_match['quote']}。{fortune_match['lucky_word']}"
+            await interaction.response.defer(ephemeral=True)
             voice_path = await text_to_speech(phrase, f"omikuji_{fortune_match['id']}.mp3", rate="-20%")
-            file = discord.File(voice_path, filename="omikuji_voice.mp3")
-            await interaction.response.send_message(f"🌸 今日幸運日語箴言：『**{fortune_match['quote']}**』語音送達！", file=file, ephemeral=True)
+            try:
+                file = discord.File(voice_path, filename="omikuji_voice.mp3")
+                await interaction.followup.send(f"🌸 今日幸運日語箴言：『**{fortune_match['quote']}**』語音送達！", file=file, ephemeral=True)
+                file.close()
+            finally:
+                remove_temp_file(voice_path)
             return
 
         # 9. 檢查是否為 DrugstoreSelectView 下拉選單
@@ -2464,13 +2624,23 @@ async def on_interaction(interaction: discord.Interaction):
             "請點擊私訊中最新的卡片按鈕，或輸入 `/quest`（繼續闖關）即可無縫暢快學習！",
             ephemeral=True
         )
+    except discord.InteractionResponded:
+        # 原本的 View 回呼已經回應過了，靜默略過
+        return
+    except discord.HTTPException as e:
+        if getattr(e, "code", None) == 40060:  # Interaction has already been acknowledged
+            return
+        print(f"處理未註冊按鈕互動時出錯: {e}", flush=True)
     except Exception as e:
         print(f"處理未註冊按鈕互動時出錯: {e}", flush=True)
-        if not interaction.response.is_done():
-            await interaction.response.send_message(
-                "💡 該卡片互動已過期，請點擊最新的訊息或輸入 `/quest` 繼續學習！",
-                ephemeral=True
-            )
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "💡 該卡片互動已過期，請點擊最新的訊息或輸入 `/quest` 繼續學習！",
+                    ephemeral=True
+                )
+        except discord.HTTPException:
+            pass
 
 
 # /help 指令
@@ -2484,7 +2654,7 @@ async def help_command(interaction: discord.Interaction):
     )
     embed.add_field(
         name="👑 `/profile`",
-        value="【個人學習檔案】查看連續打卡天數（Streak）、主線關卡進度與成就勳章牆！",
+        value="【個人學習檔案】查看累積打卡天數（Streak）、主線關卡進度與成就勳章牆！",
         inline=False
     )
     embed.add_field(
@@ -2544,7 +2714,7 @@ async def help_command(interaction: discord.Interaction):
     )
     embed.add_field(
         name="🏆 `/leaderboard`",
-        value="【日語學習天梯排行榜】查看伺服器連續打卡 Streak、關卡進度與成就榮譽榜！",
+        value="【日語學習天梯排行榜】查看伺服器累積打卡 Streak、關卡進度與成就榮譽榜！",
         inline=False
     )
     embed.add_field(
@@ -2560,6 +2730,24 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(
         name="🔄 `/quest_reset`",
         value="重置個人闖關進度回第 1 關，重新打怪升級。",
+        inline=False
+    )
+
+    # Discord 每個 Embed 最多 25 個欄位 → 拆成兩張一起送出
+    embed2 = discord.Embed(
+        title="🌸 日語學習機器人 指令指南（續）",
+        color=discord.Color.from_rgb(255, 140, 180)
+    )
+    first_embed = embed
+    embed = embed2
+    embed.add_field(
+        name="🌸 `/hub`",
+        value="【一鍵直達中樞】免記任何指令！點按鈕直接抽靈籤、聽 J-POP、玩小遊戲、超商掃雷與五十音！",
+        inline=False
+    )
+    embed.add_field(
+        name="🎡 `/arcade`",
+        value="【日語沉浸遊樂園】一鍵打開消消樂、J-POP 歌詞電台、盲盒扭蛋機與手寫道場！",
         inline=False
     )
     embed.add_field(
@@ -2628,7 +2816,7 @@ async def help_command(interaction: discord.Interaction):
         inline=False
     )
     embed.set_footer(text="日語學習，從每天的一小步開始！がんばって！")
-    await interaction.response.send_message(embed=embed)
+    await interaction.response.send_message(embeds=[first_embed, embed])
 
 
 # ====================================================
@@ -2664,16 +2852,16 @@ async def quest_command(interaction: discord.Interaction, level: int = None):
     prog = get_user_progress(interaction.user.id)
     current_lvl = prog.get("current_level", 1)
 
-    target_lvl = level if (level and 1 <= level <= 20) else current_lvl
+    target_lvl = level if (level and 1 <= level <= TOTAL_QUESTS) else current_lvl
     q = QUESTS.get(target_lvl)
     if not q:
-        await interaction.followup.send("找不到該關卡資訊（等級範圍：1~20）。")
+        await interaction.followup.send(f"找不到該關卡資訊（等級範圍：1~{TOTAL_QUESTS}）。")
         return
 
     # 進度條渲染
     filled = "🟩" * target_lvl
-    unfilled = "⬜" * max(0, 20 - target_lvl)
-    bar = f"{filled}{unfilled} (Level {target_lvl}/20)"
+    unfilled = "⬜" * max(0, TOTAL_QUESTS - target_lvl)
+    bar = f"{filled}{unfilled} (Level {target_lvl}/{TOTAL_QUESTS})"
 
     mnemonic_sec = f"\n{q['mnemonic_story']}\n" if q.get("mnemonic_story") else ""
 
@@ -2708,6 +2896,7 @@ async def quest_command(interaction: discord.Interaction, level: int = None):
         embed.set_image(url=f"attachment://quest_card_{target_lvl}.jpg")
 
     # 生成對應慢速語音
+    voice_path = None
     try:
         voice_path = await text_to_speech(q["phrase"], f"quest_{target_lvl}.mp3", rate="-25%")
         file = discord.File(voice_path, filename=f"quest_lvl{target_lvl}.mp3")
@@ -2731,17 +2920,22 @@ async def quest_command(interaction: discord.Interaction, level: int = None):
     if file:
         send_files.append(file)
 
-    if send_files:
-        await interaction.followup.send(embed=embed, files=send_files, view=view)
-    else:
-        await interaction.followup.send(embed=embed, view=view)
+    try:
+        if send_files:
+            await interaction.followup.send(embed=embed, files=send_files, view=view)
+        else:
+            await interaction.followup.send(embed=embed, view=view)
+    finally:
+        for f in send_files:
+            f.close()
+        remove_temp_file(voice_path)
 
 
 # /quest_reset 指令
 @bot.tree.command(name="quest_reset", description="重置您的個人關卡進度回第 1 關")
 async def quest_reset_command(interaction: discord.Interaction):
     reset_user_progress(interaction.user.id)
-    await interaction.response.send_message("🔄 您的關卡進度已重置為 **【第 1 關】**！隨時輸入 `/quest` 重新挑戰！", ephemeral=True)
+    await interaction.response.send_message("🔄 您的關卡進度已重置為 **【第 1 關】**（打卡天數、勳章、錯題本與推播設定都會保留）！隨時輸入 `/quest` 重新挑戰！", ephemeral=True)
 
 
 # /schedule 指令 (支援平日/假日自訂時間、開關切換與推播內容模式)
@@ -2944,6 +3138,7 @@ async def voice_command(interaction: discord.Interaction, text: str, speed: app_
     speed_name = speed.name if speed else "🐢 慢速跟讀版"
     v_mode = voice.value if voice else "female"
     v_name = voice.name if voice else "👩 溫柔女聲 (Nanami)"
+    path = None
     try:
         path = await text_to_speech(text, "voice_command.mp3", rate=rate, voice=v_mode)
         file = discord.File(path, filename="japanese_pronunciation.mp3")
@@ -2954,8 +3149,11 @@ async def voice_command(interaction: discord.Interaction, text: str, speed: app_
         )
         embed.set_footer(text="提示：新手建議先用慢速熟悉舌頭肌肉動作，多聽男聲與女聲能適應真實聽力喔！")
         await interaction.followup.send(embed=embed, file=file)
+        file.close()
     except Exception as e:
         await interaction.followup.send(f"❌ 語音生成失敗: {e}")
+    finally:
+        remove_temp_file(path)
 
 
 # /card 指令
@@ -3018,6 +3216,7 @@ async def card_command(interaction: discord.Interaction, type: app_commands.Choi
         card_color = discord.Color.from_rgb(255, 160, 80)
 
     if os.path.exists(card_path):
+        voice_path = None
         try:
             voice_path = await text_to_speech(audio_text, f"card_{chosen}_voice.mp3", rate="-20%")
             audio_file = discord.File(voice_path, filename=f"card_{chosen}.mp3")
@@ -3037,7 +3236,12 @@ async def card_command(interaction: discord.Interaction, type: app_commands.Choi
         if audio_file:
             files.append(audio_file)
 
-        await interaction.followup.send(embed=embed, files=files)
+        try:
+            await interaction.followup.send(embed=embed, files=files)
+        finally:
+            for f in files:
+                f.close()
+            remove_temp_file(voice_path)
     else:
         await interaction.followup.send("圖卡準備中，敬請期待！")
 
@@ -3092,12 +3296,16 @@ async def anime_command(interaction: discord.Interaction, title: app_commands.Ch
     )
     embed.set_footer(text="動漫日語最對味！多聽多唸，語感自然上身！")
     
+    voice_path = None
     try:
         voice_path = await text_to_speech(item["quote"], f"anime_{item['id']}.mp3", rate="-15%")
         file = discord.File(voice_path, filename=f"anime_{item['id']}.mp3")
         await interaction.followup.send(embed=embed, file=file)
+        file.close()
     except Exception:
         await interaction.followup.send(embed=embed)
+    finally:
+        remove_temp_file(voice_path)
 
 
 
@@ -3233,13 +3441,19 @@ async def daily_command(interaction: discord.Interaction):
     cat_title, item = get_random_daily_phrase()
     embed = build_daily_phrase_embed(cat_title, item)
     view = DailyCardView()
+    # TTS 生成可能超過 3 秒，先 defer 避免「應用程式未回應」
+    await interaction.response.defer()
 
+    voice_path = None
     try:
         voice_path = await text_to_speech(item["japanese"], "daily_voice.mp3")
         file = discord.File(voice_path, filename="daily_phrase.mp3")
-        await interaction.response.send_message(embed=embed, file=file, view=view)
+        await interaction.followup.send(embed=embed, file=file, view=view)
+        file.close()
     except Exception:
-        await interaction.response.send_message(embed=embed, view=view)
+        await interaction.followup.send(embed=embed, view=view)
+    finally:
+        remove_temp_file(voice_path)
 
 
 # /chat 指令 (AI 實戰情境角色扮演)
@@ -3368,7 +3582,7 @@ async def review_command(interaction: discord.Interaction):
 
 
 # /profile 指令 (個人學習檔案與成就勳章牆)
-@bot.tree.command(name="profile", description="查看個人日語學習檔案：連續打卡天數、關卡進度與成就勳章牆")
+@bot.tree.command(name="profile", description="查看個人日語學習檔案：累積打卡天數、關卡進度與成就勳章牆")
 async def profile_command(interaction: discord.Interaction):
     user_prog = get_user_progress(interaction.user.id)
     streak = user_prog.get("streak", 1)
@@ -3377,9 +3591,9 @@ async def profile_command(interaction: discord.Interaction):
     mistakes_count = len(user_prog.get("mistakes", []))
     earned_badges = user_prog.get("badges", ["first_step"])
 
-    filled = "🟩" * min(lvl, 20)
-    unfilled = "⬜" * max(0, 20 - lvl)
-    bar = f"{filled}{unfilled} (Level {lvl}/20)"
+    filled = "🟩" * min(lvl, TOTAL_QUESTS)
+    unfilled = "⬜" * max(0, TOTAL_QUESTS - lvl)
+    bar = f"{filled}{unfilled} (Level {lvl}/{TOTAL_QUESTS})"
 
     badge_lines = []
     for bid, binfo in BADGES_INFO.items():
@@ -3392,9 +3606,9 @@ async def profile_command(interaction: discord.Interaction):
     embed = discord.Embed(
         title=f"🌸 {interaction.user.display_name} 的日語修煉檔案",
         description=(
-            f"🔥 **連續打卡天數 (Streak)**：`{streak} 天` 🏅\n"
+            f"🔥 **累積打卡天數 (Streak)**：`{streak} 天` 🏅\n"
             f"📈 **闖關主線進度**：`{bar}`\n"
-            f"🏆 **已通關關卡數**：`{len(completed_lvls)} / 20 關`\n"
+            f"🏆 **已通關關卡數**：`{len(completed_lvls)} / {TOTAL_QUESTS} 關`\n"
             f"📝 **待複習錯題數**：`{mistakes_count} 題`\n\n"
             f"------------------------------------\n"
             f"### 🎖️ 【成就勳章展示牆】\n"
@@ -3485,12 +3699,16 @@ async def scan_command(interaction: discord.Interaction, image: discord.Attachme
         )
         if image:
             embed.set_image(url=image.url)
+        voice_path = None
         try:
             voice_path = await text_to_speech(text_hint, "scan_custom.mp3")
             snd_file = discord.File(voice_path, filename="scan_pronunciation.mp3")
             await interaction.followup.send(embed=embed, file=snd_file)
+            snd_file.close()
         except Exception:
             await interaction.followup.send(embed=embed)
+        finally:
+            remove_temp_file(voice_path)
         return
 
     if not target_key:
@@ -3515,12 +3733,16 @@ async def scan_command(interaction: discord.Interaction, image: discord.Attachme
         embed.set_image(url=image.url)
     embed.set_footer(text="拍照即學！赴日旅遊看到不懂的招牌、菜單、標語隨時傳給機器人解碼！")
 
+    voice_path = None
     try:
         voice_path = await text_to_speech(target_key, f"scan_{target_key}.mp3")
         snd_file = discord.File(voice_path, filename="scan_voice.mp3")
         await interaction.followup.send(embed=embed, file=snd_file)
+        snd_file.close()
     except Exception:
         await interaction.followup.send(embed=embed)
+    finally:
+        remove_temp_file(voice_path)
 
 
 # /sos 指令 (日本緊急生存就醫手指卡)
@@ -3535,35 +3757,35 @@ async def scan_command(interaction: discord.Interaction, image: discord.Attachme
 async def sos_command(interaction: discord.Interaction, scenario: app_commands.Choice[str] = None):
     chosen_key = scenario.value if scenario else "medical"
     unlock_badge(interaction.user.id, "badge_sos")
-    sc = SOS_SCENARIOS[chosen_key]
+    sc = SOS_SCENARIOS.get(chosen_key, SOS_SCENARIOS["medical"])
 
-    phrases_lines = []
-    for p in sc["phrases"]:
-        phrases_lines.append(
-            f"• **{p['jp']}**（`{p['furi']}`）\n"
-            f"  👉 中文：**{p['tw']}**\n"
-            f"  🗣️ 拼音：*{p['romaji']}*\n"
-        )
-    phrases_block = "\n".join(phrases_lines)
+    # 緊急電話（EMERGENCY_CONTACTS 是 [{name, number, note}] 列表）
+    contact_lines = "\n".join(f"• {c['name']}：**{c['number']}**" for c in EMERGENCY_CONTACTS)
 
     embed = discord.Embed(
-        title=f"🚨 {sc['title']}",
+        title=f"🚨 【緊急手指求助卡】{sc['title']}",
         description=(
-            f"ℹ️ **應急說明**：{sc['desc']}\n\n"
+            f"**{sc['intro']}**\n\n"
             f"------------------------------------\n"
             f"### 🚑 日本緊急求助電話：\n"
-            f"• 👮 警察局：**{EMERGENCY_CONTACTS['police']}**\n"
-            f"• 🚒 救護車/火警：**{EMERGENCY_CONTACTS['ambulance']}**\n"
-            f"• 🇹🇼 駐日代表處急難救助：**{EMERGENCY_CONTACTS['taiwan_representative']}**\n"
-            f"• 🌐 日本觀光局 24H 多語言熱線：**{EMERGENCY_CONTACTS['japan_visitor_hotline']}**\n\n"
+            f"{contact_lines}\n\n"
             f"------------------------------------\n"
-            f"### 👆 【手指直接給日本人看】：\n"
-            f"{phrases_block}\n"
-            f"💡 **使用秘訣**：{sc['finger_tip']}"
+            f"### 👆 【手指直接給日本人看】："
         ),
-        color=discord.Color.red()
+        color=discord.Color.red() if chosen_key in ["medical", "police"] else discord.Color.orange()
     )
-    embed.set_footer(text="可點選下方按鈕快速切換不同緊急情境！")
+    for c in sc["cards"][:25]:
+        embed.add_field(
+            name=f"🏷️ 【{c['tag']}】",
+            value=(
+                f"## 『 {c['japanese']} 』\n"
+                f"• 假名：`{c['furigana']}`\n"
+                f"• 拼音：*{c['romaji']}*\n"
+                f"• 🇹🇼 **中文意涵**：**{c['chinese']}**"
+            ),
+            inline=False
+        )
+    embed.set_footer(text="不用開口！直接拿著此畫面給日本人看即可求救！可點選下方按鈕快速切換不同緊急情境！")
     view = SOSView(chosen_key)
     await interaction.response.send_message(embed=embed, view=view)
 
@@ -3579,18 +3801,18 @@ async def sos_command(interaction: discord.Interaction, scenario: app_commands.C
 async def menu_command(interaction: discord.Interaction, category: app_commands.Choice[str] = None):
     chosen_cat = category.value if category else "yakiniku"
     unlock_badge(interaction.user.id, "badge_menu")
-    data = MENU_CATEGORIES[chosen_cat]
+    data = MENU_CATEGORIES.get(chosen_cat, MENU_CATEGORIES["yakiniku"])
 
     embed = discord.Embed(
         title=f"🍽️ {data['title']}",
-        description=f"{data['desc']}\n\n點選下方按鈕可切換其他菜單類型！",
+        description=f"{data['description']}\n\n點選下方按鈕可切換其他菜單類型！",
         color=discord.Color.from_rgb(230, 100, 50)
     )
 
-    for item in data["items"][:6]:
+    for item in data["items"][:25]:
         embed.add_field(
-            name=f"🥢 {item['name']}（{item['kana']}） - {item['chinese']}",
-            value=f"• 拼音：*{item['romaji']}*\n• 💡 **特色/點餐秘笈**：{item['desc']}",
+            name=f"🥢 {item['japanese']}（{item['meaning']}）",
+            value=f"• 讀音：`{item['furigana']}`\n• 💡 **特色/點餐秘笈**：{item['detail']}",
             inline=False
         )
 
@@ -3614,27 +3836,22 @@ async def menu_command(interaction: discord.Interaction, category: app_commands.
 async def grammar_command(interaction: discord.Interaction, verb: app_commands.Choice[str] = None):
     chosen_verb = verb.value if verb else "iku"
     unlock_badge(interaction.user.id, "badge_grammar")
-    v_data = VERB_CONJUGATIONS[chosen_verb]
+    v_data = VERB_CONJUGATIONS.get(chosen_verb, VERB_CONJUGATIONS["iku"])
 
     embed = discord.Embed(
-        title=f"🧩 日語動詞變化速查：【{v_data['name']}】",
+        title=f"🧩 日語動詞變化速查：【{v_data['verb']}】",
         description=(
-            f"🏷️ **動詞分類**：`{v_data['type']}` | 中文：**{v_data['meaning']}**\n\n"
+            f"🏷️ **動詞分類**：`{v_data['type']}` | 中文：**{v_data['meaning']}**\n"
+            f"🌟 **實用例句**：{v_data['example']}\n\n"
             f"🎵 **【五段動詞 て形 快速記憶口訣歌】**：\n"
             f"```text\n{TE_FORM_MNEMONIC}\n```\n"
             f"------------------------------------\n"
-            f"### 📋 【核心七大活用形即查即用】：\n"
-            f"• 🔹 **字典形（原形）**：`{v_data['dict']}` (*{v_data['dict_romaji']}*)\n"
-            f"• 🔹 **ます形（禮貌形）**：`{v_data['masu']}` (*{v_data['masu_romaji']}*)\n"
-            f"• 🔹 **て形（連接/請託）**：`{v_data['te']}` (*{v_data['te_romaji']}*)\n"
-            f"• 🔹 **た形（過去式）**：`{v_data['ta']}` (*{v_data['ta_romaji']}*)\n"
-            f"• 🔹 **ない形（否定式）**：`{v_data['nai']}` (*{v_data['nai_romaji']}*)\n"
-            f"• 🔹 **意向形（想要/建議）**：`{v_data['volitional']}` (*{v_data['vol_romaji']}*)\n"
-            f"• 🔹 **條件/可能形**：`{v_data['ba_form']}` / `{v_data['potential']}`\n\n"
-            f"💡 **用法提示**：{v_data['tip']}"
-        ),
+            f"### 📋 【全套動詞變化展開表】"
+        )[:4096],
         color=discord.Color.from_rgb(130, 90, 220)
     )
+    for form_name, form_val in v_data["forms"].items():
+        embed.add_field(name=form_name, value=f"`{form_val}`", inline=True)
     embed.set_footer(text="點擊下方按鈕可快速切換不同動詞！")
     view = GrammarSelectView(chosen_verb)
     await interaction.response.send_message(embed=embed, view=view)
@@ -3644,78 +3861,80 @@ async def grammar_command(interaction: discord.Interaction, verb: app_commands.C
 @bot.tree.command(name="news", description="NHK 簡易日語新聞：通勤微閱讀（附假名注音、單字解析與語音）")
 @app_commands.describe(article="選擇要閱讀的新聞主題")
 @app_commands.choices(article=[
-    app_commands.Choice(name="🌸 2026 日本櫻花開花預測出爐", value="sakura"),
-    app_commands.Choice(name="🚄 新幹線超大行李預約新規定", value="shinkansen"),
-    app_commands.Choice(name="🛍️ 外國遊客免稅手續 QR Code 化變更", value="taxfree"),
+    # 直接由新聞資料產生選項，確保 value 一定對得上文章 id
+    app_commands.Choice(name=a["title"][:100], value=a["id"]) for a in NHK_NEWS_ARTICLES[:25]
 ])
 async def news_command(interaction: discord.Interaction, article: app_commands.Choice[str] = None):
     await interaction.response.defer()
-    chosen_id = article.value if article else "sakura"
+    chosen_id = article.value if article else NHK_NEWS_ARTICLES[0]["id"]
     unlock_badge(interaction.user.id, "badge_news")
 
     art = next((a for a in NHK_NEWS_ARTICLES if a["id"] == chosen_id), NHK_NEWS_ARTICLES[0])
 
     vocab_lines = []
     for v in art["vocabulary"]:
-        vocab_lines.append(f"• **{v['word']}**（`{v['furi']}`）: {v['tw']} (*{v['romaji']}*)")
+        vocab_lines.append(f"• **{v['word']}**：{v['meaning']}")
     vocab_text = "\n".join(vocab_lines)
 
     embed = discord.Embed(
         title=f"📰 {art['title']}",
         description=(
-            f"📅 **發布日期**：`{art['date']}` | 難易度：`{art['level']}`\n\n"
+            f"📅 **發布日期**：`{art['date']}`\n\n"
             f"------------------------------------\n"
-            f"### 🇯🇵 日文原文（附振假名）：\n"
-            f"{art['japanese_furi']}\n\n"
+            f"### 🇯🇵 日文原文：\n"
+            f"{art['japanese']}\n\n"
+            f"🔤 **假名讀音**：\n{art['furigana']}\n\n"
             f"------------------------------------\n"
-            f"### 🇹🇼 中文對照翻譯：\n"
-            f"{art['translation']}\n\n"
+            f"### 🇹🇼 中文摘要：\n"
+            f"{art['summary']}\n\n"
             f"------------------------------------\n"
             f"### 📚 【重點必備單字】：\n"
             f"{vocab_text}\n\n"
             f"👇 **下方已為您生成這篇新聞的標準真人朗讀語音！**"
-        ),
+        )[:4096],
         color=discord.Color.from_rgb(30, 144, 255)
     )
     embed.set_footer(text="NHK NEWS WEB EASY 每天花 3 分鐘，語感聽力大提升！")
 
+    voice_path = None
     try:
-        voice_path = await text_to_speech(art["japanese_plain"], f"news_{chosen_id}.mp3")
+        voice_path = await text_to_speech(art["japanese"], f"news_{art['id']}.mp3")
         file = discord.File(voice_path, filename="news_audio.mp3")
         await interaction.followup.send(embed=embed, file=file)
+        file.close()
     except Exception:
         await interaction.followup.send(embed=embed)
+    finally:
+        remove_temp_file(voice_path)
 
 
 # /shadowing 指令 (實戰跟讀挑戰與語調指導)
 @bot.tree.command(name="shadowing", description="日語實戰跟讀挑戰：高低語調走向、連音指導與標準朗讀")
 @app_commands.describe(drill="選擇跟讀練習題目")
 @app_commands.choices(drill=[
-    app_commands.Choice(name="☕ 超商點單 (ホットコーヒーをひとつお願いします)", value="drill_1"),
-    app_commands.Choice(name="💳 免稅詢問 (これ、免税になりますか？)", value="drill_2"),
-    app_commands.Choice(name="📍 景點問路 (すみません、駅はどちらですか？)", value="drill_3"),
-    app_commands.Choice(name="🍜 餐廳結帳 (ごちそうさまでした。お会計をお願いします)", value="drill_4"),
+    # 直接由跟讀資料產生選項（情境 + 句子），確保 value 一定對得上題目 id
+    app_commands.Choice(name=f"{d['scenario']} ({d['sentence']})"[:100], value=d["id"]) for d in SHADOWING_DRILLS[:25]
 ])
 async def shadowing_command(interaction: discord.Interaction, drill: app_commands.Choice[str] = None):
     await interaction.response.defer()
-    chosen_id = drill.value if drill else "drill_1"
+    chosen_id = drill.value if drill else SHADOWING_DRILLS[0]["id"]
     unlock_badge(interaction.user.id, "badge_shadowing")
 
     d = next((item for item in SHADOWING_DRILLS if item["id"] == chosen_id), SHADOWING_DRILLS[0])
 
     embed = discord.Embed(
-        title=f"🗣️ 日語跟讀影子練習：【{d['title']}】",
+        title=f"🗣️ 日語跟讀影子練習：【{d['scenario']}】",
         description=(
-            f"📈 **音調走向**：`{d['pitch_pattern']}`\n\n"
+            f"⭐ **難易度**：`{d['stars']}`\n\n"
             f"------------------------------------\n"
             f"### 🗣️ 日文句子：\n"
-            f"## 『 {d['japanese']} 』\n"
+            f"## 『 {d['sentence']} 』\n"
             f"• 振假名：`{d['furigana']}`\n"
             f"• 羅馬音：*{d['romaji']}*\n"
-            f"• 中文意思：**{d['translation']}**\n\n"
+            f"• 中文意思：**{d['meaning']}**\n\n"
             f"------------------------------------\n"
-            f"### 💡 【跟讀與發音技巧訣竅】：\n"
-            f"{d['tip']}\n\n"
+            f"### 💡 【語調與發音技巧訣竅】：\n"
+            f"{d['pitch_tip']}\n\n"
             f"### 🎯 【實踐步驟】：\n"
             f"1️⃣ 先聽一遍下方音檔，感受母語者的節奏與語調。\n"
             f"2️⃣ 稍微落後 0.5 秒，邊聽邊開口模仿跟讀（影子練習法）。\n"
@@ -3725,16 +3944,20 @@ async def shadowing_command(interaction: discord.Interaction, drill: app_command
     )
     embed.set_footer(text="影子練習法 (Shadowing) 是日語口說語調提升最迅速的科學訓練法！")
 
+    voice_path = None
     try:
-        voice_path = await text_to_speech(d["japanese"], f"shadowing_{chosen_id}.mp3")
+        voice_path = await text_to_speech(d["sentence"], f"shadowing_{d['id']}.mp3")
         file = discord.File(voice_path, filename="shadowing_sample.mp3")
         await interaction.followup.send(embed=embed, file=file)
+        file.close()
     except Exception:
         await interaction.followup.send(embed=embed)
+    finally:
+        remove_temp_file(voice_path)
 
 
 # /leaderboard 指令 (學習天梯與打卡排行榜)
-@bot.tree.command(name="leaderboard", description="查看日語學習天梯排行榜：連續打卡與通關榮譽榜")
+@bot.tree.command(name="leaderboard", description="查看日語學習天梯排行榜：累積打卡與通關榮譽榜")
 async def leaderboard_command(interaction: discord.Interaction):
     leaders = get_leaderboard(limit=10)
 
@@ -3760,7 +3983,7 @@ async def leaderboard_command(interaction: discord.Interaction):
 
         lines.append(
             f"{icon} {user_mention}\n"
-            f"   🔥 Streak：`{streak} 天` | ⚔️ 關卡：`Level {lvl} ({completed_cnt}/20)` | 🎖️ 勳章：`{badges_cnt} 個`"
+            f"   🔥 Streak：`{streak} 天` | ⚔️ 關卡：`Level {lvl} ({completed_cnt}/{TOTAL_QUESTS})` | 🎖️ 勳章：`{badges_cnt} 個`"
         )
 
     board_text = "\n\n".join(lines)
@@ -3768,14 +3991,14 @@ async def leaderboard_command(interaction: discord.Interaction):
     embed = discord.Embed(
         title="🏆 日語修煉殿堂・學霸排行榜",
         description=(
-            f"榜單依據連續打卡天數（Streak）與主線關卡進度排序！\n\n"
+            f"榜單依據累積打卡天數（Streak）與主線關卡進度排序！\n\n"
             f"{board_text}\n\n"
             f"------------------------------------\n"
             f"💡 **每日衝榜密技**：每天使用任何學習指令（如 `/daily`、`/quest`、`/quiz`），即可維持連勝！"
         ),
         color=discord.Color.gold()
     )
-    embed.set_footer(text="排行榜每小時即時更新，持之以恆者必成大器！")
+    embed.set_footer(text="排行榜依最新學習紀錄排序，持之以恆者必成大器！")
     await interaction.response.send_message(embed=embed)
 
 
@@ -3828,11 +4051,16 @@ async def drugstore_command(interaction: discord.Interaction, category: app_comm
 ])
 async def lyrics_command(interaction: discord.Interaction, song: app_commands.Choice[str] = None):
     record_daily_activity(interaction.user.id)
+    if not JPOP_SONGS:
+        await interaction.response.send_message(LYRICS_MISSING_MSG, ephemeral=True)
+        return
     chosen = song.value if song else "idol"
+    if chosen not in JPOP_SONGS:
+        chosen = "idol" if "idol" in JPOP_SONGS else next(iter(JPOP_SONGS))
     embed = build_lyrics_embed(chosen)
     view = LyricsSelectView(chosen)
 
-    song_data = JPOP_SONGS.get(chosen, JPOP_SONGS["idol"])
+    song_data = JPOP_SONGS[chosen]
     files_to_send = []
     clip_rel = song_data.get("music_file", "")
     clip_full = os.path.join(os.path.dirname(__file__), clip_rel)
@@ -3861,7 +4089,34 @@ async def kana_game_command(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=game_view)
 
 
+# ====================================================
+# 🌸 /arcade 指令 (日語沉浸式學習遊樂園網頁版)
+# ====================================================
+@bot.tree.command(name="arcade", description="🌸【日語沉浸遊樂園】一鍵打開 0 延遲消消樂、J-POP 歌詞電台、盲盒扭蛋機與手寫道場！")
+async def arcade_command(interaction: discord.Interaction):
+    record_daily_activity(interaction.user.id)
+    embed = discord.Embed(
+        title="🌸【日語沉浸式學習遊樂園】網頁版已升級登場！",
+        description=(
+            "告別網路延遲！專為零基礎與日語愛好者打造的 **5 大沉浸式遊樂模組**：\n\n"
+            "🎮 **1. 五十音極速消消樂**：0ms 敲擊連擊、Combo 音效、30 秒限時狂熱！\n"
+            "🎤 **2. J-POP KTV 歌詞電台**：10 首正版原音、積木拆字浮窗、跟唱密技！\n"
+            "🎰 **3. 秋葉原盲盒扭蛋機**：擬真轉盤動效、抽取 UR 動漫台詞與御神籤！\n"
+            "🖌️ **4. 智能手寫評分道場**：46 假名米字格、筆順動畫示範、三星評分！\n"
+            "📻 **5. 五十音沉浸循環輪播**：日系大字排版、自動定時朗讀、口訣字源！\n\n"
+            "📂 **如何開啟網頁遊樂園？**\n"
+            "在您電腦的 `Japanese_Learning` 資料夾中：\n"
+            "👉 直接雙擊：**`開啟日語遊樂園.bat`** 或 **`index.html`**\n"
+            "即可在瀏覽器中盡情享受完全零延遲的極致聲光體驗！✨"
+        ),
+        color=discord.Color.from_rgb(255, 107, 139)
+    )
+    embed.set_footer(text="電腦瀏覽器直接開啟，支援完整鍵盤、滑鼠與音效互動！")
+    await interaction.response.send_message(embed=embed)
+
+
 def main():
+
     if not TOKEN or TOKEN == "your_bot_token_here":
         print("\n" + "="*60)
         print("⚠️ 尚未設定 DISCORD_BOT_TOKEN！")

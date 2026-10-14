@@ -12,9 +12,24 @@
 
 import os
 import json
+import shutil
 import datetime
 
+try:
+    from data.quest_data import QUESTS
+except ImportError:  # 直接在 data/ 目錄下執行時
+    from quest_data import QUESTS
+
 PROGRESS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "user_progress.json")
+TOTAL_QUESTS = len(QUESTS)  # 主線闖關總關數
+
+# 所有日期一律以台北時間 (UTC+8) 計算，與定時推播排程一致（不依賴 tzdata）
+TAIPEI_TZ = datetime.timezone(datetime.timedelta(hours=8))
+
+
+def taipei_today() -> datetime.date:
+    """回傳台北時間的今天日期"""
+    return datetime.datetime.now(TAIPEI_TZ).date()
 
 # 成就徽章定義庫
 BADGES_INFO = {
@@ -72,11 +87,11 @@ BADGES_INFO = {
     },
     "badge_streak_3": {
         "name": "🔥 三日堅持",
-        "desc": "連續打卡學習達到 3 天"
+        "desc": "累積打卡學習達到 3 天"
     },
     "badge_streak_7": {
         "name": "👑 七日不輟",
-        "desc": "連續打卡學習達到 7 天"
+        "desc": "累積打卡學習達到 7 天"
     },
     "badge_quest_master": {
         "name": "🏆 旅遊通關王",
@@ -84,7 +99,7 @@ BADGES_INFO = {
     },
     "badge_quest_20": {
         "name": "🎓 日語大圓滿",
-        "desc": "達成全 20 關終極通關！融入道地日本生活"
+        "desc": f"達成全 {TOTAL_QUESTS} 關終極通關！融入道地日本生活"
     },
     "badge_weekend": {
         "name": "🏖️ 週末充電王",
@@ -93,17 +108,29 @@ BADGES_INFO = {
 }
 
 def load_progress() -> dict:
-    if os.path.exists(PROGRESS_FILE):
+    if not os.path.exists(PROGRESS_FILE):
+        return {}
+    try:
+        with open(PROGRESS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        # 檔案損毀：先備份再丟出例外，絕不回傳 {}（否則下次存檔會把所有人的進度清空）
+        stamp = datetime.datetime.now(TAIPEI_TZ).strftime("%Y%m%d-%H%M%S")
+        backup = os.path.join(os.path.dirname(PROGRESS_FILE), f"user_progress.corrupt-{stamp}.json")
         try:
-            with open(PROGRESS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+            shutil.copy2(PROGRESS_FILE, backup)
         except Exception:
-            return {}
-    return {}
+            pass
+        raise
 
 def save_progress(data: dict):
-    with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
+    # 原子寫入：先寫暫存檔再取代，避免寫到一半當機造成 JSON 損毀
+    tmp_path = PROGRESS_FILE + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, PROGRESS_FILE)
 
 def get_user_progress(user_id: int) -> dict:
     data = load_progress()
@@ -113,7 +140,7 @@ def get_user_progress(user_id: int) -> dict:
             "current_level": 1,
             "completed_levels": [],
             "streak": 1,
-            "last_active_date": str(datetime.date.today()),
+            "last_active_date": str(taipei_today()),
             "mistakes": [],
             "badges": ["first_step"],
             "schedule_time": "21:00",
@@ -129,7 +156,7 @@ def get_user_progress(user_id: int) -> dict:
             data[uid]["streak"] = 1
             updated = True
         if "last_active_date" not in data[uid]:
-            data[uid]["last_active_date"] = str(datetime.date.today())
+            data[uid]["last_active_date"] = str(taipei_today())
             updated = True
         if "mistakes" not in data[uid]:
             data[uid]["mistakes"] = []
@@ -160,7 +187,7 @@ def record_daily_activity(user_id: int) -> tuple[int, bool]:
     data = load_progress()
     uid = str(user_id)
     user_info = get_user_progress(user_id)
-    today = datetime.date.today()
+    today = taipei_today()
     last_date_str = user_info.get("last_active_date")
     
     is_first_today = False
@@ -207,17 +234,17 @@ def advance_user_level(user_id: int, finished_level: int) -> tuple[int, bool]:
         completed.append(finished_level)
         user_info["completed_levels"] = completed
     
-    if user_info.get("current_level", 1) == finished_level and finished_level < 20:
+    if user_info.get("current_level", 1) == finished_level and finished_level < TOTAL_QUESTS:
         user_info["current_level"] = finished_level + 1
         is_new_level = True
     
-    # 檢查第 1 季通關 (10 關)
-    if len(user_info.get("completed_levels", [])) >= 10:
+    # 檢查第 1 季通關（第 1~10 關全部完成）
+    if set(range(1, 11)) <= set(user_info.get("completed_levels", [])):
         if "badge_quest_master" not in user_info.get("badges", []):
             user_info["badges"].append("badge_quest_master")
 
-    # 檢查第 2 季大圓滿通關 (20 關)
-    if len(user_info.get("completed_levels", [])) >= 20:
+    # 檢查大圓滿通關（全部關卡完成）
+    if set(QUESTS.keys()) <= set(user_info.get("completed_levels", [])):
         if "badge_quest_20" not in user_info.get("badges", []):
             user_info["badges"].append("badge_quest_20")
 
@@ -253,7 +280,7 @@ def add_mistake(user_id: int, question: str, answer: str, explanation: str, opti
         "answer": answer,
         "explanation": explanation,
         "options": options,
-        "date": str(datetime.date.today())
+        "date": str(taipei_today())
     })
     user_info["mistakes"] = mistakes
     data[uid] = user_info
@@ -328,7 +355,7 @@ def toggle_user_schedule(user_id: int) -> bool:
     return new_state
 
 def get_leaderboard(limit: int = 10) -> list:
-    """取得所有使用者的天梯排行榜資料（依連續天數與通關關卡排序）"""
+    """取得所有使用者的天梯排行榜資料（依累積打卡天數與通關關卡排序）"""
     data = load_progress()
     leaderboard = []
     for uid, info in data.items():
@@ -344,17 +371,26 @@ def get_leaderboard(limit: int = 10) -> list:
     return leaderboard[:limit]
 
 def reset_user_progress(user_id: int):
+    """只重置主線闖關進度（目前關卡與已通關列表），保留打卡、勳章、錯題本與推播設定"""
     data = load_progress()
     uid = str(user_id)
-    data[uid] = {
-        "current_level": 1,
-        "completed_levels": [],
-        "streak": 1,
-        "last_active_date": str(datetime.date.today()),
-        "mistakes": [],
-        "badges": ["first_step"],
-        "schedule_time": "21:00",
-        "schedule_weekend_time": "10:30",
-        "schedule_enabled": True
-    }
+    user_info = get_user_progress(user_id)
+    user_info["current_level"] = 1
+    user_info["completed_levels"] = []
+    data[uid] = user_info
+    save_progress(data)
+
+
+def get_last_push_date(user_id: int) -> str:
+    """取得使用者上次成功收到定時推播的日期（台北時間，YYYY-MM-DD），沒有則回傳空字串"""
+    return get_user_progress(user_id).get("last_push_date", "")
+
+
+def set_last_push_date(user_id: int, date_str: str):
+    """記錄使用者成功收到定時推播的日期（推播成功後才呼叫）"""
+    data = load_progress()
+    uid = str(user_id)
+    user_info = get_user_progress(user_id)
+    user_info["last_push_date"] = date_str
+    data[uid] = user_info
     save_progress(data)
