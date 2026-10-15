@@ -26,3 +26,9 @@ arcade.html
 arcade_data.js
 arcade_data.json
 /index.html
+
+# 輪替後的日誌（bot.err.1 等）
+bot.err*
+*.log.*
+user_progress.*.json
+user_progress.json.tmp
