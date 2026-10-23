@@ -1354,9 +1354,6 @@
     try { localStorage.setItem("jp_theme", root.dataset.theme); } catch {}
   });
 
-  renderStat();
-  route();
-
   /* ---------------- 安裝成 App ---------------- */
   const isStandalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
   const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
@@ -1378,6 +1375,9 @@
     });
     window.addEventListener("appinstalled", () => { installBtn.classList.add("hidden"); toast("🎉 已安裝！之後可以從主畫面直接打開"); });
   }
+
+  renderStat();
+  route();
 
   // 可安裝成 App、離線可用（本機預覽時不啟用，避免快取干擾開發）
   if ("serviceWorker" in navigator && !/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) {
