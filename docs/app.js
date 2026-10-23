@@ -1300,6 +1300,14 @@
       <div class="grid tight">${Object.entries(D.badges).map(([k, b]) => `
         <div class="card badge-tile ${P.badges.includes(k) ? "" : "locked"}"><div style="font-size:1.05rem"><b>${esc(b.name)}</b></div><div class="small muted">${esc(b.desc)}</div></div>`).join("")}</div>
       <div class="card" style="margin-top:20px">
+        <h2>📲 安裝成 App</h2>
+        ${isStandalone() ? `<p class="small">✅ 你現在就是用 App 開啟的。</p>` : `<ul class="small">
+          <li><b>Android</b>：Chrome 開啟本站 → 右上角 ⋮ →「安裝應用程式」（或點頂端的「📲 安裝 App」）</li>
+          <li><b>iPhone／iPad</b>：用 <b>Safari</b> 開啟 → 下方「分享」⬆️ →「加入主畫面」</li>
+          <li><b>電腦</b>：Chrome／Edge 網址列右側的 ⊕ 安裝圖示</li></ul>
+          <p class="small muted">裝好後會出現在主畫面，全螢幕開啟、離線也能用。iPhone 上 App 的進度跟 Safari 分開記錄，可以先在這裡「匯出進度」，再到 App 裡「匯入」。</p>`}
+      </div>
+      <div class="card" style="margin-top:20px">
         <h2>💾 進度備份</h2>
         <p class="small muted">進度只存在這個瀏覽器。換裝置時可匯出再匯入。</p>
         <div class="row"><button class="btn" id="exp">⬇️ 匯出進度</button><button class="btn" id="imp">⬆️ 匯入進度</button><button class="btn" id="wipe">🗑️ 清除全部進度</button></div>
@@ -1348,6 +1356,28 @@
 
   renderStat();
   route();
+
+  /* ---------------- 安裝成 App ---------------- */
+  const isStandalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  let installPrompt = null;
+  const installBtn = document.getElementById("installBtn");
+  const showInstallHelp = () => {
+    toast(isIOS ? "iPhone／iPad：用 Safari 開啟，點下方「分享」⬆️ →「加入主畫面」" : "請在瀏覽器選單（⋮）裡選「安裝應用程式」或「加到主畫面」");
+  };
+  if (!isStandalone()) {
+    // Android / 電腦 Chrome、Edge：瀏覽器確認可以安裝時才顯示按鈕
+    window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); installPrompt = e; installBtn.classList.remove("hidden"); });
+    if (isIOS) installBtn.classList.remove("hidden"); // iOS 沒有安裝事件，改顯示步驟說明
+    installBtn.addEventListener("click", async () => {
+      if (!installPrompt) return showInstallHelp();
+      installPrompt.prompt();
+      const { outcome } = await installPrompt.userChoice;
+      installPrompt = null;
+      if (outcome === "accepted") installBtn.classList.add("hidden");
+    });
+    window.addEventListener("appinstalled", () => { installBtn.classList.add("hidden"); toast("🎉 已安裝！之後可以從主畫面直接打開"); });
+  }
 
   // 可安裝成 App、離線可用（本機預覽時不啟用，避免快取干擾開發）
   if ("serviceWorker" in navigator && !/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) {

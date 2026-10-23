@@ -1,5 +1,5 @@
 /* 離線快取：有網路時一律抓最新版（network-first），斷線才用快取，避免部署後還看到舊版 */
-const CACHE = "jp-dojo-v2";
+const CACHE = "jp-dojo-v3";
 const SHELL = ["./", "index.html", "style.css", "app.js", "data.js", "manifest.webmanifest", "icons/icon-192.png", "kana_player.html", "handwriting.html"];
 
 self.addEventListener("install", (e) => {
