@@ -29,7 +29,8 @@
     .char-picker {
       display: flex;
       gap: 8px;
-      margin-bottom: 16px;
+      max-width: 680px;
+      margin: 0 auto 16px;
       flex-wrap: wrap;
       justify-content: center;
     }
@@ -109,15 +110,7 @@
   <h1>🌸 日語假名手寫練習板</h1>
   <p class="sub">用滑鼠或手機觸控，在米字格上練習寫字！</p>
 
-  <div class="char-picker" id="picker">
-    <button class="char-btn active" data-char="あ" data-romaji="a" data-tip="張開手看到紅蘋果驚呼：あ (啊)！">あ</button>
-    <button class="char-btn" data-char="い" data-romaji="i" data-tip="一長一短兩根竹子，微拉嘴角念 i。">い</button>
-    <button class="char-btn" data-char="う" data-romaji="u" data-tip="上面一點，肚子微凸，嘴巴放鬆念 u。">う</button>
-    <button class="char-btn" data-char="え" data-romaji="e" data-tip="像一個英文字母 Z 帶飄帶，念 e。">え</button>
-    <button class="char-btn" data-char="お" data-romaji="o" data-tip="正襟危坐低頭鞠躬禮貌的人，念 o。">お</button>
-    <button class="char-btn" data-char="こ" data-romaji="ko" data-tip="上下兩片漢堡麵包皮，念 ko。">こ</button>
-    <button class="char-btn" data-char="れ" data-romaji="re" data-tip="昂首挺胸尾巴俏麗的白天鵝，念 re。">れ</button>
-  </div>
+  <div class="char-picker" id="picker"></div>
 
   <div class="board-container">
     <canvas id="gridCanvas" width="320" height="320"></canvas>
@@ -129,19 +122,19 @@
     <button class="btn btn-guide" id="btnGuide">👁️ 描紅開關</button>
   </div>
 
-  <div class="tip-box" id="tipBox">
-    <strong>💡 當前記憶口訣：</strong><br>
-    張開手看到紅蘋果驚呼：あ (啊)！
-  </div>
+  <div class="tip-box" id="tipBox"></div>
 
+  <script src="data.js"></script>
   <script>
+    // 假名與記憶口訣跟主站共用 data.js（由 data/kana_data.py 產生），不在這裡另存一份
+    const KANA_CARDS = window.JP_DATA.kanaCards;
     const drawCanvas = document.getElementById('drawCanvas');
     const gridCanvas = document.getElementById('gridCanvas');
     const dctx = drawCanvas.getContext('2d');
     const gctx = gridCanvas.getContext('2d');
 
     let showGuide = true;
-    let currentChar = 'あ';
+    let currentChar = KANA_CARDS[0].hira;
     let isDrawing = false;
 
     // 繪製米字格與背景描紅
@@ -233,12 +226,28 @@
     // 切換假名
     const picker = document.getElementById('picker');
     const tipBox = document.getElementById('tipBox');
+    function showTip(card) {
+      tipBox.replaceChildren();
+      const head = document.createElement('strong');
+      head.textContent = `💡 當前記憶口訣（${card.hira}・${card.romaji}）：`;
+      tipBox.append(head, document.createElement('br'), card.mnemonic);
+    }
+    KANA_CARDS.forEach((card, i) => {
+      const b = document.createElement('button');
+      b.className = 'char-btn' + (i === 0 ? ' active' : '');
+      b.textContent = card.hira;
+      b.dataset.i = i;
+      b.title = card.romaji;
+      picker.appendChild(b);
+    });
+    showTip(KANA_CARDS[0]);
     picker.addEventListener('click', (e) => {
       if (e.target.classList.contains('char-btn')) {
         document.querySelectorAll('.char-btn').forEach(b => b.classList.remove('active'));
         e.target.classList.add('active');
-        currentChar = e.target.dataset.char;
-        tipBox.innerHTML = `<strong>💡 當前記憶口訣（${currentChar}）：</strong><br>${e.target.dataset.tip}`;
+        const card = KANA_CARDS[Number(e.target.dataset.i)];
+        currentChar = card.hira;
+        showTip(card);
         dctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
         drawBackground();
       }

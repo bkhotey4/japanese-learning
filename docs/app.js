@@ -17,10 +17,15 @@
     .replace(/<\/h4><br>/g, "</h4>")
     .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
     .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\[([^\]]+)\]\((#\/[^)\s]*)\)/g, '<a href="$2">$1</a>') // 只接受站內路由 [文字](#/路由)
     .replace(/(^|[^*])\*([^*\s][^*]*?)\*(?!\*)/g, "$1<i>$2</i>");
+  const lsGet = (k, d = null) => { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch { return d; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* 私密模式 */ } };
+  const SITE = D.site;
   const shuffle = (a) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
   const pick = (a) => a[Math.floor(Math.random() * a.length)];
-  const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+  const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const todayStr = () => ymd(new Date());
   const dayIndex = () => { const d = new Date(); return Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000); };
 
   // 換頁時自動失效的計時器與事件監聽，避免舊頁面的程式在新頁面上執行
@@ -60,7 +65,7 @@
     const u = new SpeechSynthesisUtterance(t);
     u.lang = "ja-JP";
     if (jaVoice) u.voice = jaVoice;
-    u.rate = rate || Number(localStorage.getItem("jp_rate") || 0.8);
+    u.rate = rate || Number(lsGet("jp_rate", 0.8)) || 0.8;
     speechSynthesis.speak(u);
   }
   const speakBtn = (text, label = "🔊") => `<button class="btn small speak" data-speak="${esc(text)}" title="朗讀">${label}</button>`;
@@ -135,7 +140,7 @@
     };
     recog.onerror = (ev) => {
       const msg = ev.error === "not-allowed" || ev.error === "service-not-allowed" ? "麥克風權限被拒絕，請在瀏覽器網址列允許使用麥克風。"
-        : ev.error === "no-speech" ? "沒有聽到聲音，請靠近麥克風再試一次。" : `語音辨識失敗（${ev.error}），建議使用 Chrome 或 Edge。`;
+        : ev.error === "no-speech" ? "沒有聽到聲音，請靠近麥克風再試一次。" : `語音辨識失敗（${esc(ev.error)}），建議使用 Chrome 或 Edge。`;
       out.innerHTML = `<div class="feedback bad small">${msg}</div>`;
     };
     recog.onend = () => { b.textContent = label; recog = null; };
@@ -145,8 +150,7 @@
   /* ---------------- 學習進度（localStorage，取代 user_progress.json） ---------------- */
   const KEY = "jp_progress_v1";
   const blank = () => ({ level: 1, completed: [], streak: 0, lastDate: null, badges: [], mistakes: [], answered: 0, correct: 0 });
-  let P;
-  try { P = Object.assign(blank(), JSON.parse(localStorage.getItem(KEY) || "{}")); } catch { P = blank(); }
+  let P = blank(); // 真正的讀取在最下面 loadProgress()：normalizeP 需要用到後面才定義的常數
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(P)); } catch { /* 私密模式 */ } renderStat(); };
 
   function unlock(id) {
@@ -163,8 +167,7 @@
     if (!P.days.includes(t)) { P.days.push(t); save(); }
     unlock("first_step");
     const run = consecutiveDays();
-    if (run >= 3) unlock("badge_streak_3");
-    if (run >= 7) unlock("badge_streak_7");
+    for (const [id, days] of Object.entries(SITE.settings.streak_badges)) if (run >= days) unlock(id);
     const wd = new Date().getDay();
     if (wd === 0 || wd === 6) unlock("badge_weekend");
   }
@@ -175,7 +178,7 @@
     if (!days.has(todayStr())) d.setDate(d.getDate() - 1);
     let n = 0;
     for (;;) {
-      const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const k = ymd(d);
       if (!days.has(k)) return n;
       n++; d.setDate(d.getDate() - 1);
     }
@@ -185,8 +188,49 @@
     if (!P.completed.includes(n)) P.completed.push(n);
     if (P.level === n && n < QUEST_N()) P.level = n + 1;
     save();
-    if (P.completed.length >= Math.min(10, QUEST_N())) unlock("badge_quest_master");
+    if (P.completed.length >= Math.min(SITE.settings.quest_master_levels, QUEST_N())) unlock("badge_quest_master");
     if (P.completed.length >= QUEST_N()) unlock("badge_quest_20");
+  }
+  // 讀進來的進度（localStorage 或匯入的備份碼）可能是舊版、損壞或被改過：統一整理成安全的型別，
+  // 避免頁面因為 null／字串而白屏，也避免把字串直接插進 HTML
+  function normalizeP(raw) {
+    const src = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+    const p = Object.assign(blank(), src);
+    const arr = (v) => (Array.isArray(v) ? v : []);
+    const obj = (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
+    const int = (v, d = 0) => (Number.isFinite(Number(v)) ? Math.max(0, Math.floor(Number(v))) : d);
+    const isDate = (v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+    const marks = (v) => (typeof v === "string" ? v : "").replace(/[^⭕❌]/gu, "");
+    p.completed = [...new Set(arr(p.completed).map(Number).filter((n) => D.quests[String(n)]))];
+    p.level = Math.min(Math.max(1, int(p.level, 1)), QUEST_N());
+    p.badges = [...new Set(arr(p.badges).filter((b) => typeof b === "string" && D.badges[b]))];
+    p.mistakes = arr(p.mistakes).filter((m) => m && typeof m.question === "string" && Array.isArray(m.options) && m.options.includes(m.answer));
+    p.days = arr(p.days).filter(isDate);
+    ["streak", "answered", "correct", "micTries", "micBest", "written", "srsReviews"].forEach((k) => { p[k] = int(p[k]); });
+    p.lastDate = isDate(p.lastDate) ? p.lastDate : null;
+    p.goal = typeof p.goal === "string" && SITE.goals[p.goal] ? p.goal : null;
+    p.dailyResults = Object.fromEntries(Object.entries(obj(p.dailyResults)).filter(([k, r]) => isDate(k) && r && typeof r === "object")
+      .map(([k, r]) => { const m = marks(r.marks); return [k, { score: int(r.score), total: int(r.total) || m.length || 1, marks: m }]; }));
+    if (p.dailyProgress) {
+      const dp = obj(p.dailyProgress);
+      p.dailyProgress = isDate(dp.date) ? { date: dp.date, marks: arr(dp.marks).filter((m) => m === "⭕" || m === "❌") } : undefined;
+      if (!p.dailyProgress) delete p.dailyProgress;
+    }
+    p.hobiDone = obj(p.hobiDone);
+    p.srs = Object.fromEntries(Object.entries(obj(p.srs)).filter(([, v]) => v && typeof v === "object" && isDate(v.due)));
+    const ss = obj(p.srsSettings);
+    p.srsSettings = {};
+    if (Array.isArray(ss.decks)) p.srsSettings.decks = ss.decks.filter((k) => DECKS[k]);
+    if (int(ss.newPerDay) > 0) p.srsSettings.newPerDay = int(ss.newPerDay);
+    const sn = obj(p.srsNew);
+    p.srsNew = isDate(sn.date) ? { date: sn.date, count: int(sn.count) } : undefined;
+    if (!p.srsNew) delete p.srsNew;
+    return p;
+  }
+  function loadProgress() {
+    let raw = {};
+    try { raw = JSON.parse(lsGet(KEY) || "{}"); } catch { /* 損壞就從頭開始 */ }
+    P = normalizeP(raw);
   }
   function addMistake(q) {
     if (!P.mistakes.some((m) => m.question === q.question)) {
@@ -201,7 +245,7 @@
   /* ---------------- 共用：選擇題元件 ---------------- */
   // q: {question, options, answer, explanation}; onDone(correct)
   function mountQuiz(el, q, { onDone, trackMistake = true, nextLabel, onNext } = {}) {
-    const opts = shuffle(q.options);
+    const opts = shuffle([...new Set(q.options)]); // 重複的選項只留一個，避免兩顆一樣的按鈕
     el.innerHTML = `
       <div class="md jp-q">${md(q.question)}</div>
       <div class="options">${opts.map((o, i) => `<button class="option" data-i="${i}">${esc(o)}</button>`).join("")}</div>
@@ -240,34 +284,25 @@
   const pages = {};
 
   /* ---------------- 新手引導：依學習目標推薦路線 ---------------- */
-  const GOALS = {
-    travel: { icon: "✈️", name: "日本自由行", desc: "點餐、購物、問路、退稅", steps: [
-      ["quest/1", "⚔️ 第 1 關：これ、ください", "最萬用的點餐神句"], ["talk/ramen", "🍜 拉麵店角色扮演", "實際走一遍點餐流程"], ["travel/sos", "🚨 SOS 手指卡", "出發前一定要存"]] },
-    anime: { icon: "🎌", name: "看懂動漫日劇", desc: "聽懂台詞、不靠字幕", steps: [
-      ["anime", "🎌 動漫名台詞教室", "鬼滅、咒術、柯南…"], ["kana/game", "🎮 五十音消除遊戲", "先把假名練成反射"], ["talk/anime", "💬 動漫常用口語", "すごい、やばい、まじで"]] },
-    life: { icon: "🏠", name: "日本生活", desc: "超商、看醫生、租屋", steps: [
-      ["talk/daily", "🏠 日常生活會話", "每天都用得到"], ["talk/convenience", "🏪 超商結帳角色扮演", "要加熱嗎？要袋子嗎？"], ["travel/culture", "🛡️ 文化避坑指南", "居酒屋、電車、溫泉禮儀"]] },
-    work: { icon: "💼", name: "職場工作", desc: "敬語、商務應對", steps: [
-      ["talk/work", "💼 職場敬語入門", "かしこまりました"], ["grammar", "🧩 動詞變化", "て形口訣歌一次搞懂"], ["news", "📰 NHK 簡易新聞", "練商務閱讀"]] },
-  };
+  const GOALS = SITE.goals; // 內容在 data/web_content.py
   function onboardingHTML() {
     return `<div class="card hero">
       <h1>歡迎來到日語學習道場 🌸</h1>
       <p>完全免費、不用註冊，每天 15 分鐘，從五十音學到日本自由行。<br><b>你學日語最想做到什麼？</b></p>
       <div class="options">${Object.entries(GOALS).map(([k, g]) => `
-        <button class="option" data-goal="${k}"><span style="font-size:1.5rem">${g.icon}</span> <b>${g.name}</b><br><span class="small muted">${g.desc}</span></button>`).join("")}</div>
+        <button class="option" data-goal="${esc(k)}"><span style="font-size:1.5rem">${esc(g.icon)}</span> <b>${esc(g.name)}</b><br><span class="small muted">${esc(g.desc)}</span></button>`).join("")}</div>
       <p class="small muted" style="margin:0">或直接 <a href="#/daily">▶ 玩今天的 3 分鐘挑戰</a></p></div>`;
   }
   function goalPathHTML() {
     const g = GOALS[P.goal];
-    return `<div class="card"><div class="spread"><h2>🧭 你的專屬路線：${g.icon} ${g.name}</h2><button class="btn small" data-goal="">換目標</button></div>
-      <div class="grid" style="margin-top:8px">${g.steps.map(([h, t, d], i) => `
-        <a class="card link" href="#/${h}" style="box-shadow:none"><div class="small muted">STEP ${i + 1}</div><b>${t}</b><div class="small muted">${d}</div></a>`).join("")}</div></div>`;
+    return `<div class="card"><div class="spread"><h2>🧭 你的專屬路線：${esc(g.icon)} ${esc(g.name)}</h2><button class="btn small" data-goal="">換目標</button></div>
+      <div class="grid" style="margin-top:8px">${g.steps.map((st, i) => `
+        <a class="card link" href="${esc(st.href)}" style="box-shadow:none"><div class="small muted">STEP ${i + 1}</div><b>${esc(st.title)}</b><div class="small muted">${esc(st.desc)}</div></a>`).join("")}</div></div>`;
   }
   document.addEventListener("click", (e) => {
     const b = e.target.closest("[data-goal]");
     if (!b) return;
-    P.goal = b.dataset.goal || null;
+    P.goal = GOALS[b.dataset.goal] ? b.dataset.goal : null;
     save();
     if (P.goal) toast(`${GOALS[P.goal].icon} 已為你規劃「${GOALS[P.goal].name}」路線！`);
     route();
@@ -286,8 +321,8 @@
       <p class="lead">每天 15 分鐘，從五十音到日本自由行、生活與職場。進度存在這台裝置的瀏覽器裡。</p>` : onboardingHTML()}
       <a class="card link daily-cta" href="#/daily" style="margin:16px 0">
         <div class="spread"><div><h2 style="margin:0">🗓️ 今日挑戰 ${todayStr().slice(5).replace("-", "/")}</h2>
-          <div class="small muted">每天一組新題目・3 分鐘</div></div>
-          <span class="btn ${done ? "" : "primary"}">${done ? `${done.marks} ${done.score}/${done.total || 5}` : "開始挑戰 ➡️"}</span></div></a>
+          <div class="small muted">每天一組新題目・${dailyQuestions(todayStr()).length} 題</div></div>
+          <span class="btn ${done ? "" : "primary"}">${done ? `${esc(done.marks)} ${done.score}/${done.total}` : "開始挑戰 ➡️"}</span></div></a>
       ${(() => { const n = dueCount(); return `<a class="card link" href="#/cards${n ? "/study" : ""}" style="margin-bottom:16px">
         <div class="spread"><div><h2 style="margin:0">🃏 單字卡複習</h2><div class="small muted">${n ? `今天有 ${n} 張要練，大約 ${Math.max(1, Math.round(n * 0.15))} 分鐘` : "今天的卡片都練完了 🎉"}</div></div>
         <span class="btn ${n ? "primary" : ""}">${n ? "開始 ➡️" : "查看牌組"}</span></div></a>`; })()}
@@ -373,7 +408,7 @@
     const d = new Date();
     if (!r[todayStr()]) d.setDate(d.getDate() - 1); // 今天還沒做，不算斷
     for (;;) {
-      const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const k = ymd(d);
       if (!r[k]) return n;
       n++; d.setDate(d.getDate() - 1);
     }
@@ -381,15 +416,16 @@
   function heatmapHTML() {
     const days = new Set([...(P.days || []), ...Object.keys(P.dailyResults || {})]);
     const cells = [];
-    const d = new Date(); d.setDate(d.getDate() - 34);
-    for (let i = 0; i < 35; i++) {
-      const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const WEEKS = 5;
+    const d = new Date(); d.setDate(d.getDate() - (WEEKS * 7 - 1));
+    for (let i = 0; i < WEEKS * 7; i++) {
+      const k = ymd(d);
       const res = (P.dailyResults || {})[k];
-      const lvl = res ? (res.score >= (res.total || 5) * 0.8 ? 3 : 2) : days.has(k) ? 1 : 0;
-      cells.push(`<div class="heat l${lvl}" title="${k}${res ? ` 挑戰 ${res.score}/${res.total || 5}` : days.has(k) ? " 有學習" : ""}"></div>`);
+      const lvl = res ? (res.score >= res.total * 0.8 ? 3 : 2) : days.has(k) ? 1 : 0;
+      cells.push(`<div class="heat l${lvl}" title="${k}${res ? ` 挑戰 ${res.score}/${res.total}` : days.has(k) ? " 有學習" : ""}"></div>`);
       d.setDate(d.getDate() + 1);
     }
-    return `<div class="heatmap">${cells.join("")}</div><div class="small muted" style="margin-top:6px">最近 5 週：淺色＝有學習，深色＝完成每日挑戰</div>`;
+    return `<div class="heatmap">${cells.join("")}</div><div class="small muted" style="margin-top:6px">最近 ${WEEKS} 週：淺色＝有學習，深色＝完成每日挑戰</div>`;
   }
   pages.daily = () => {
     const date = todayStr();
@@ -428,10 +464,10 @@
     next();
   };
   function showDailyResult(el, date, r) {
-    const total = r.total || 5, ratio = r.score / total;
+    const total = r.total || 1, ratio = r.score / total;
     const msg = ratio === 1 ? "🌸 全對！太強了！" : ratio >= 0.8 ? "👏 很棒！差一點就全對" : ratio >= 0.4 ? "💪 不錯，明天再來！" : "🌱 每天一點點，明天一定更好！";
     const text = `🌸 日語學習道場 每日挑戰 ${date.slice(5).replace("-", "/")}\n${r.marks} ${r.score}/${total}\n🔥 連續挑戰 ${dailyStreak()} 天\n一起來學日語 👉 ${SITE_URL}#/daily`;
-    el.innerHTML = `<div style="text-align:center"><div style="font-size:2.4rem;letter-spacing:4px">${r.marks}</div>
+    el.innerHTML = `<div style="text-align:center"><div style="font-size:2.4rem;letter-spacing:4px">${esc(r.marks)}</div>
         <div class="jp-big">${r.score} / ${total}</div><p><b>${msg}</b></p>
         <pre class="share-text">${esc(text)}</pre>
         <div class="row" style="justify-content:center"><button class="btn primary" id="shareBtn">📤 分享成績</button>
@@ -583,7 +619,8 @@
 
     // 聽辨：念 a 或 b，選出聽到的是哪一個
     listen: (el, d, done) => {
-      const rounds = shuffle(d.pairs).slice(0, 6);
+      const rounds = shuffle(d.pairs || []).slice(0, 6);
+      if (!rounds.length) return done();
       let r = 0, right = 0;
       const round = () => {
         if (r >= rounds.length) {
@@ -619,6 +656,7 @@
 
     // 開口念：每一句都可以聽、念、評分
     say: (el, d, done) => {
+      if (!(d.items || []).length) return done();
       el.innerHTML = `<div class="md">${md(d.prompt)}</div><div class="stack" style="margin-top:12px">${d.items.map((it) => `
         <div class="box"><div class="spread"><span class="jp" style="font-size:1.25rem">${esc(it.jp)}</span><span class="small">${esc(it.meaning)}</span></div>
           <div class="furi">${esc(it.reading)}</div>${it.tip ? `<div class="small muted md">${md(it.tip)}</div>` : ""}
@@ -629,7 +667,8 @@
 
     // 補順序：藏起一格，選出缺的
     order: (el, d, done) => {
-      const seq = d.sequence;
+      const seq = [...new Set(d.sequence || [])];
+      if (seq.length < 2) return done();
       let r = 0, streak = 0;
       const total = Math.min(5, seq.length);
       const round = () => {
@@ -656,6 +695,7 @@
 
     // 描寫：何博士說假名是「圖」，要用寫的才記得
     write: (el, d, done) => {
+      if (!(d.kana || []).length) return done();
       el.innerHTML = `<div class="md">${md(d.prompt)}</div>
         <div class="row" id="wPick" style="gap:6px;margin:10px 0"></div>
         <label class="small"><input type="checkbox" id="wHide"> 遮住範本，憑記憶寫</label>
@@ -667,7 +707,8 @@
 
     // 何博士的背單字法：聽日文 → 說中文；看中文 → 說日文
     recall: (el, d, done) => {
-      const items = d.items;
+      const items = d.items || [];
+      if (!items.length) return done();
       let i = 0, phase = 1;
       const show = () => {
         if (i >= items.length) {
@@ -836,7 +877,8 @@
   pages.quiz = (arg) => {
     const all = [...D.quiz, ...D.katakanaQuizzes.map((q) => ({ ...q, category: "片假名外來語" }))];
     const cats = [...new Set(all.map((q) => q.category))];
-    const cat = arg ? decodeURIComponent(arg) : "";
+    let cat = "";
+    try { cat = arg ? decodeURIComponent(arg) : ""; } catch { /* 網址編碼壞掉就顯示全部 */ }
     const pool = cat && all.some((q) => q.category === cat) ? all.filter((q) => q.category === cat) : all;
     $app.innerHTML = `
       <h1>🎯 隨堂測驗</h1>
@@ -857,7 +899,7 @@
     next();
   };
   /* ---------------- 單字卡：間隔重複複習（簡化版 SM-2，類似 Anki） ---------------- */
-  const addDays = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+  const addDays = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return ymd(d); };
   const DECKS = {
     kana: { name: "🔤 五十音", build: () => D.kanaCards.map((c) => ({ id: "kana:" + c.hira, front: c.hira, reading: `${c.romaji}・片假名 ${c.kata}`, back: c.romaji, extra: `🧠 ${c.mnemonic}`, say: c.hira })) },
     quest: { name: "⚔️ 闖關句子", build: () => Object.values(D.quests).map((q) => ({ id: "quest:" + q.level, front: q.phrase, reading: q.romaji, back: q.meaning, extra: q.scenario, say: q.phrase })) },
@@ -876,7 +918,7 @@
   let _allCards = null;
   const allCards = () => _allCards || (_allCards = Object.entries(DECKS).flatMap(([deck, d]) => d.build().map((c) => ({ ...c, deck }))));
   const srsState = (id) => (P.srs || {})[id];
-  const srsSettings = () => Object.assign({ newPerDay: 10, decks: ["kana", "quest", "phrase"] }, P.srsSettings || {});
+  const srsSettings = () => Object.assign({ newPerDay: SITE.settings.srs_new_per_day, decks: SITE.settings.srs_default_decks.slice() }, P.srsSettings || {});
   function newLeftToday() {
     const t = todayStr();
     const used = P.srsNew && P.srsNew.date === t ? P.srsNew.count : 0;
@@ -922,8 +964,8 @@
       const cs = allCards().filter((c) => c.deck === k);
       const learned = cs.filter((c) => srsState(c.id)).length;
       const due = cs.filter((c) => { const s = srsState(c.id); return s && s.due <= t; }).length;
-      const mature = cs.filter((c) => { const s = srsState(c.id); return s && s.iv >= 21; }).length;
-      return `<tr><td><label><input type="checkbox" data-deck="${k}" ${set.decks.includes(k) ? "checked" : ""}> ${d.name}</label></td>
+      const mature = cs.filter((c) => { const s = srsState(c.id); return s && s.iv >= SITE.settings.srs_mature_days; }).length;
+      return `<tr><td><label><input type="checkbox" data-deck="${k}" ${set.decks.includes(k) ? "checked" : ""}> ${esc(d.name)}</label></td>
         <td>${cs.length}</td><td>${learned}</td><td>${mature}</td><td><b>${due}</b></td></tr>`;
     }).join("");
     $app.innerHTML = `<h1>🃏 單字卡</h1>
@@ -934,10 +976,10 @@
           ${q.due.length + q.fresh.length ? `<a class="btn primary" href="#/cards/study">▶ 開始複習</a>` : `<span class="btn">🎉 今天完成了！</span>`}</div>
       </div>
       <div class="card" style="max-width:760px;margin-top:14px">
-        <h2>📚 牌組</h2><p class="small muted">勾選要練習的牌組。「熟記」＝間隔超過 21 天。</p>
+        <h2>📚 牌組</h2><p class="small muted">勾選要練習的牌組。「熟記」＝間隔超過 ${SITE.settings.srs_mature_days} 天。</p>
         <div class="table-wrap"><table class="small"><tr><th>牌組</th><th>總數</th><th>學過</th><th>熟記</th><th>待複習</th></tr>${rows}</table></div>
         <div class="row" style="margin-top:12px"><label class="small">每天新卡數量
-          <select id="newPerDay" style="width:auto;display:inline-block;margin-left:6px">${[5, 10, 15, 20, 30].map((n) => `<option ${n === set.newPerDay ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+          <select id="newPerDay" style="width:auto;display:inline-block;margin-left:6px">${[...new Set([...SITE.settings.srs_new_per_day_choices, set.newPerDay])].sort((a, b) => a - b).map((n) => `<option ${n === set.newPerDay ? "selected" : ""}>${n}</option>`).join("")}</select></label>
           <span class="small muted">今天還可學 ${newLeftToday()} 張新卡</span></div>
       </div>`;
     const saveSet = (patch) => { P.srsSettings = Object.assign(srsSettings(), patch); save(); route(); };
@@ -962,7 +1004,7 @@
       cur = queue.shift();
       flipped = false;
       if (!cur) {
-        activity();
+        if (doneN) activity();
         el.innerHTML = `<div style="text-align:center"><div style="font-size:3rem">🎉</div><h2>今天的單字卡完成了！</h2>
           <p class="muted">練了 ${doneN} 次，明天再來。</p><a class="btn primary" href="#/cards">回單字卡</a></div>`;
         return;
@@ -972,12 +1014,12 @@
         <div class="progress" style="margin:6px 0 18px"><div style="width:${total ? (doneN / (doneN + queue.length + 1)) * 100 : 0}%"></div></div>
         <div style="text-align:center;min-height:150px">
           <div class="${cur.front.length <= 2 ? "jp-huge" : "jp-big"}">${esc(cur.front)}</div>
-          <div class="row" style="justify-content:center;margin-top:8px">${speakBtn(cur.say)}${micBtn(cur.say, cur.reading.split("｜")[0])}</div>
+          <div class="row" style="justify-content:center;margin-top:8px">${speakBtn(cur.say)}${micBtn(cur.say, (cur.reading || "").split("｜")[0])}</div>
           <div id="ans"></div>
         </div>
         <div id="act" style="margin-top:16px"><button class="btn primary" id="flip" style="width:100%">顯示答案（空白鍵）</button></div>`;
       document.getElementById("flip").addEventListener("click", flip);
-      if (localStorage.getItem("jp_autospeak") !== "0") speak(cur.say);
+      if (lsGet("jp_autospeak") !== "0") speak(cur.say);
     };
     const flip = () => {
       if (!cur || flipped) return;
@@ -1095,7 +1137,7 @@
   // ===== 文法（/grammar） =====
   pages.grammar = () => {
     unlock("badge_grammar");
-    $app.innerHTML = `<h1>🧩 動詞變化</h1><p class="lead">七個最常用動詞的完整變化，配上て形口訣歌。</p>
+    $app.innerHTML = `<h1>🧩 動詞變化</h1><p class="lead">${Object.keys(D.verbs).length} 個最常用動詞的完整變化，配上て形口訣歌。</p>
       <div class="card box gold md" style="margin-bottom:16px">${md(D.teForm)}</div>
       <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(320px,1fr))">${Object.values(D.verbs).map((v) => `
         <div class="card"><div class="spread"><h3 class="jp">${esc(v.verb)}</h3>${speakBtn(v.verb.split(" ")[0])}</div>
@@ -1106,7 +1148,7 @@
 
   // ===== 跟讀（/voice + /shadowing） =====
   pages.speak = () => {
-    const rate = Number(localStorage.getItem("jp_rate") || 0.8);
+    const rate = Number(lsGet("jp_rate", 0.8)) || 0.8;
     $app.innerHTML = `<h1>🗣️ 發音與跟讀</h1><p class="lead">先聽 🔊，再按 🎤 念一次，網站會幫你的發音打分數。建議用 Chrome / Edge${SR ? "" : "（你目前的瀏覽器不支援語音辨識，所以看不到 🎤 按鈕）"}。</p>
       <div class="card" style="margin-bottom:16px">
         <h2>🔊 日文發音機</h2>
@@ -1131,13 +1173,13 @@
     const tm = document.getElementById("ttsMic");
     if (tm) tm.addEventListener("click", () => { tm.dataset.mic = document.getElementById("ttsText").value; });
     const r = document.getElementById("rate");
-    r.addEventListener("input", () => { document.getElementById("rateVal").textContent = r.value; try { localStorage.setItem("jp_rate", r.value); } catch {} });
+    r.addEventListener("input", () => { document.getElementById("rateVal").textContent = r.value; lsSet("jp_rate", r.value); });
   };
 
   // ===== 旅遊（/menu + /drugstore + /scan + /sos + /culture） =====
   pages.travel = (arg) => {
-    const tab = arg || "sos";
     const tabs = [["sos", "🚨 SOS 手指卡"], ["culture", "🛡️ 文化避坑"], ["menu", "🥩 美食菜單"], ["shop", "💊 藥妝/超市標示"], ["signs", "🪧 招牌解碼"]];
+    const tab = tabs.some(([k]) => k === arg) ? arg : "sos";
     let body = "";
     if (tab === "sos") {
       unlock("badge_sos");
@@ -1251,39 +1293,18 @@
 
   // ===== 學習計畫（/plan） =====
   pages.plan = (arg) => {
-    const tab = arg || "weekday";
-    const plans = {
-      weekday: `<h2>☕ 平日通勤：每日 15 分鐘微學習</h2>
-        <p>目標不是苦讀，而是<b>維持語感不中斷</b>。</p>
-        <div class="stack">
-          <div class="box"><b>☀️ 前 5 分鐘【熱身刷卡】</b><br>首頁看 <a href="#/">今日一句</a>，或用 <a href="#/kana">五十音</a> 複習一行發音。</div>
-          <div class="box"><b>🧠 中 7 分鐘【微量吸收】</b><br>挑戰 1 個 <a href="#/quest">主線關卡</a>，或在 <a href="#/grammar">文法</a> 速查 1 個動詞變化。</div>
-          <div class="box"><b>🗣️ 後 3 分鐘【開口跟讀】</b><br>大聲跟讀 3 次，完成隨堂測驗就打卡收工！</div>
-          <div class="box gold">💡 今天太累也沒關係，哪怕只做 1 題 <a href="#/quiz">測驗</a>，累積天數就會 +1。</div>
-        </div>`,
-      weekend: `<h2>🏖️ 週末：30～45 分鐘沉浸實戰</h2>
-        <p>任選 2～3 個 15 分鐘模組自由搭配：</p>
-        <div class="stack">
-          <div class="box"><b>🎬 模組 1【動漫時事精聽】</b><br><a href="#/anime">動漫名台詞</a>、<a href="#/news">NHK 簡易新聞</a>、<a href="#/songs">童謡跟唱</a></div>
-          <div class="box"><b>🍜 模組 2【情境模擬與美食解碼】</b><br><a href="#/talk">角色扮演</a>、<a href="#/travel/menu">燒肉壽司菜單</a>、<a href="#/travel/culture">文化避坑</a></div>
-          <div class="box"><b>🗣️ 模組 3【影子跟讀與錯題清倉】</b><br><a href="#/speak">影子跟讀</a>、<a href="#/review">錯題本</a></div>
-          <div class="box gold">🎖️ 週六日學習即可解鎖「🏖️ 週末充電王」成就！</div>
-        </div>`,
-      roadmap: `<h2>🗺️ 全階段日語路線圖</h2>
-        <div class="stack">
-          ${[
-            ["階段 0：發音與五十音", "2～4 週", "假名直覺反射"],
-            ["階段 1：旅遊生存與基礎會話", "JLPT N5｜2～3 個月", "自由行通關 ✈️"],
-            ["階段 2：生活溝通與休閒娛樂", "JLPT N4～N3｜4～6 個月", "獨立生活 🏠 + 娛樂沉浸 🎮"],
-            ["階段 3：職場入門與流暢交流", "JLPT N2｜6～9 個月", "日商求職、商務書信 💼"],
-            ["階段 4：專業商務與深度融入", "JLPT N1 / BJT", "深度談判與商務協作"],
-          ].map(([a, b, c], i) => `<div class="box"><b>${a}</b> <span class="small muted">（${b}）</span><br>${c}</div>${i < 4 ? '<div style="text-align:center" class="muted">↓</div>' : ""}`).join("")}
-          <div class="box gold"><b>🎯 四大核心場景</b><br>✈️ 旅遊：點餐、問路、交通、退稅<br>🏠 生活：超商、租屋、看診<br>🎮 休閒：動漫、日劇、日本社群<br>💼 工作：日商應對、商業 Email、敬語</div>
-        </div>`,
-    };
-    $app.innerHTML = `<h1>📋 學習計畫</h1><p class="lead">上班族專屬：能長久堅持，遠比一次讀很久更重要。</p>
-      <div class="row" style="margin-bottom:14px">${[["weekday", "☕ 平日 15 分"], ["weekend", "🏖️ 假日沉浸"], ["roadmap", "🗺️ 路線圖"]].map(([k, t]) => `<a class="chip ${k === tab ? "active" : ""}" href="#/plan/${k}">${t}</a>`).join("")}</div>
-      <div class="card" style="max-width:760px">${plans[tab] || plans.weekday}</div>`;
+    const { intro, tabs } = SITE.plans; // 內容在 data/web_content.py
+    const t = tabs.find((x) => x.id === arg) || tabs[0];
+    const box = (cls, html) => `<div class="box${cls ? " " + cls : ""}">${html}</div>`;
+    const body = [
+      ...(t.blocks || []).map((b) => box("", `<b>${esc(b.title)}</b><br>${md(b.body)}`)),
+      ...(t.stages || []).map((st, i, a) => box("", `<b>${esc(st.title)}</b> <span class="small muted">（${esc(st.time)}）</span><br>${esc(st.goal)}`)
+        + (i < a.length - 1 ? '<div style="text-align:center" class="muted">↓</div>' : "")),
+      t.tip ? box("gold", md(t.tip)) : "",
+    ].join("");
+    $app.innerHTML = `<h1>📋 學習計畫</h1><p class="lead">${esc(intro)}</p>
+      <div class="row" style="margin-bottom:14px">${tabs.map((x) => `<a class="chip ${x === t ? "active" : ""}" href="#/plan/${esc(x.id)}">${esc(x.label)}</a>`).join("")}</div>
+      <div class="card" style="max-width:760px"><h2>${esc(t.title)}</h2>${t.intro ? `<p>${md(t.intro)}</p>` : ""}<div class="stack">${body}</div></div>`;
   };
 
   // ===== 我的（/profile） =====
@@ -1295,7 +1316,7 @@
           .map(([e, v, t]) => `<div class="card"><div class="emoji">${e}</div><div style="font-size:1.6rem;font-weight:700">${v}</div><div class="small muted">${t}</div></div>`).join("")}
       </div>
       <div class="card" style="margin-bottom:16px"><div class="spread"><h2>📅 學習紀錄</h2>
-        ${P.goal ? `<span class="small">目標：${GOALS[P.goal].icon} ${GOALS[P.goal].name} <button class="btn small" data-goal="">更換</button></span>` : `<a class="btn small" href="#/">🧭 選擇學習目標</a>`}</div>${heatmapHTML()}</div>
+        ${P.goal ? `<span class="small">目標：${esc(GOALS[P.goal].icon)} ${esc(GOALS[P.goal].name)} <button class="btn small" data-goal="">更換</button></span>` : `<a class="btn small" href="#/">🧭 選擇學習目標</a>`}</div>${heatmapHTML()}</div>
       <h2>🎖️ 成就勳章 (${P.badges.length}/${Object.keys(D.badges).length})</h2>
       <div class="grid tight">${Object.entries(D.badges).map(([k, b]) => `
         <div class="card badge-tile ${P.badges.includes(k) ? "" : "locked"}"><div style="font-size:1.05rem"><b>${esc(b.name)}</b></div><div class="small muted">${esc(b.desc)}</div></div>`).join("")}</div>
@@ -1320,9 +1341,8 @@
     go.onclick = () => {
       try {
         const data = JSON.parse(decodeURIComponent(escape(atob(io.value.trim()))));
-        if (!data || typeof data !== "object" || !Array.isArray(data.badges || []) || !Array.isArray(data.mistakes || [])) throw new Error("bad");
-        P = Object.assign(blank(), data);
-        if (P.goal && !GOALS[P.goal]) P.goal = null;
+        if (!data || typeof data !== "object" || Array.isArray(data) || !Array.isArray(data.badges || []) || !Array.isArray(data.mistakes || [])) throw new Error("bad");
+        P = normalizeP(data);
         save(); toast("✅ 匯入成功"); route();
       }
       catch { toast("❌ 備份碼格式錯誤"); }
@@ -1333,6 +1353,7 @@
   /* ---------------- 路由 ---------------- */
   function route() {
     if ("speechSynthesis" in window) speechSynthesis.cancel();
+    if (recog) { recog.abort(); recog = null; } // 換頁就停止錄音，避免結果寫到舊頁面
     newPageSession();
     const [name = "", arg] = location.hash.replace(/^#\/?/, "").split("/");
     const page = Object.prototype.hasOwnProperty.call(pages, name) ? pages[name] : pages[""];
@@ -1376,6 +1397,7 @@
     window.addEventListener("appinstalled", () => { installBtn.classList.add("hidden"); toast("🎉 已安裝！之後可以從主畫面直接打開"); });
   }
 
+  loadProgress();
   renderStat();
   route();
 
