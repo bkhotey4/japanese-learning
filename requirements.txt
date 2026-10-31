@@ -1,4 +1,6 @@
-discord.py>=2.3.2
-python-dotenv>=1.0.0
-edge-tts>=7.2.8
+# 機器人 (bot.py) 執行所需套件；上限避免未來大改版直接壞掉
+discord.py>=2.3.2,<3
+python-dotenv>=1.0.0,<2
+edge-tts>=7.2.8,<8
+# 以下僅供圖卡/影片產生腳本使用（make_video.py、render_animated_video.py 等），bot.py 本身不需要
 pillow>=10.0.0

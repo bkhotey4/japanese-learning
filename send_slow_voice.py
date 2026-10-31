@@ -18,7 +18,7 @@ if sys.stdout and hasattr(sys.stdout, "reconfigure"):
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-TARGET_USER_ID = 548823614900797441
+TARGET_USER_ID = int(os.getenv("DISCORD_OWNER_ID") or 548823614900797441)  # 可在 .env 設定 DISCORD_OWNER_ID
 
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)

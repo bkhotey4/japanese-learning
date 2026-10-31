@@ -32,3 +32,6 @@ bot.err*
 *.log.*
 user_progress.*.json
 user_progress.json.tmp
+
+# 單一實例鎖檔（bot.py 執行時建立）
+bot.lock

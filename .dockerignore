@@ -1,0 +1,25 @@
+# 機密與本機環境
+.env
+venv/
+.venv/
+__pycache__/
+*.pyc
+.git/
+.claude/
+
+# 執行期日誌與鎖檔
+*.log
+*.log.*
+bot.err*
+_watchdog.log
+bot.lock
+
+# 個人學習進度（請改用 volume 掛載 /app/user_progress.json）
+user_progress*.json
+user_progress.json.tmp
+
+# 與 bot 執行無關的大型媒體 / 網站
+*.wav
+*.mp4
+docs/
+tools/

@@ -12,16 +12,34 @@
 
 import os
 import json
+import time
 import shutil
 import datetime
+import functools
+import threading
 
 try:
     from data.quest_data import QUESTS
+    from data.kana_data import KANA_ROWS
 except ImportError:  # 直接在 data/ 目錄下執行時
     from quest_data import QUESTS
+    from kana_data import KANA_ROWS
 
 PROGRESS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "user_progress.json")
 TOTAL_QUESTS = len(QUESTS)  # 主線闖關總關數
+KANA_DAYS = len(KANA_ROWS)  # 五十音每日循環站數（一行一站）
+
+# 所有「讀取 → 修改 → 存檔」都在同一把鎖內完成，避免多執行緒（或未來改用 to_thread）同時寫入互相覆蓋。
+# 用 RLock：公開函式之間會互相呼叫（例如 record_daily_activity 內呼叫 get_user_progress）。
+_LOCK = threading.RLock()
+
+
+def _locked(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        with _LOCK:
+            return func(*args, **kwargs)
+    return wrapper
 
 # 所有日期一律以台北時間 (UTC+8) 計算，與定時推播排程一致（不依賴 tzdata）
 TAIPEI_TZ = datetime.timezone(datetime.timedelta(hours=8))
@@ -107,6 +125,7 @@ BADGES_INFO = {
     }
 }
 
+@_locked
 def load_progress() -> dict:
     if not os.path.exists(PROGRESS_FILE):
         return {}
@@ -123,6 +142,7 @@ def load_progress() -> dict:
             pass
         raise
 
+@_locked
 def save_progress(data: dict):
     # 原子寫入：先寫暫存檔再取代，避免寫到一半當機造成 JSON 損毀
     tmp_path = PROGRESS_FILE + ".tmp"
@@ -130,8 +150,17 @@ def save_progress(data: dict):
         json.dump(data, f, ensure_ascii=False, indent=2)
         f.flush()
         os.fsync(f.fileno())
-    os.replace(tmp_path, PROGRESS_FILE)
+    # Windows 上若有其他程式（防毒、網站匯出腳本、編輯器）正好開著檔案，os.replace 會暫時 PermissionError → 短暫重試
+    for attempt in range(5):
+        try:
+            os.replace(tmp_path, PROGRESS_FILE)
+            return
+        except PermissionError:
+            if attempt == 4:
+                raise
+            time.sleep(0.05 * (attempt + 1))
 
+@_locked
 def get_user_progress(user_id: int) -> dict:
     data = load_progress()
     uid = str(user_id)
@@ -183,13 +212,15 @@ def get_user_progress(user_id: int) -> dict:
             save_progress(data)
     return data[uid]
 
+@_locked
 def record_daily_activity(user_id: int) -> tuple[int, bool]:
     data = load_progress()
     uid = str(user_id)
     user_info = get_user_progress(user_id)
     today = taipei_today()
     last_date_str = user_info.get("last_active_date")
-    
+    badges_before = len(user_info.get("badges", []))
+
     is_first_today = False
     if last_date_str:
         try:
@@ -219,10 +250,13 @@ def record_daily_activity(user_id: int) -> tuple[int, bool]:
     if today.weekday() >= 5 and "badge_weekend" not in user_info.get("badges", []):
         user_info["badges"].append("badge_weekend")
 
-    data[uid] = user_info
-    save_progress(data)
+    # 同一天內的後續點擊沒有任何變動 → 不重寫檔案（每個按鈕都會呼叫這裡，省下大量磁碟寫入）
+    if is_first_today or len(user_info.get("badges", [])) != badges_before:
+        data[uid] = user_info
+        save_progress(data)
     return current_streak, is_first_today
 
+@_locked
 def advance_user_level(user_id: int, finished_level: int) -> tuple[int, bool]:
     data = load_progress()
     uid = str(user_id)
@@ -252,6 +286,7 @@ def advance_user_level(user_id: int, finished_level: int) -> tuple[int, bool]:
     save_progress(data)
     return user_info["current_level"], is_new_level
 
+@_locked
 def unlock_badge(user_id: int, badge_id: str) -> bool:
     data = load_progress()
     uid = str(user_id)
@@ -265,6 +300,7 @@ def unlock_badge(user_id: int, badge_id: str) -> bool:
         return True
     return False
 
+@_locked
 def add_mistake(user_id: int, question: str, answer: str, explanation: str, options: list):
     data = load_progress()
     uid = str(user_id)
@@ -286,10 +322,12 @@ def add_mistake(user_id: int, question: str, answer: str, explanation: str, opti
     data[uid] = user_info
     save_progress(data)
 
+@_locked
 def get_mistakes(user_id: int) -> list:
     user_info = get_user_progress(user_id)
     return user_info.get("mistakes", [])
 
+@_locked
 def remove_mistake(user_id: int, question: str) -> bool:
     data = load_progress()
     uid = str(user_id)
@@ -304,6 +342,7 @@ def remove_mistake(user_id: int, question: str) -> bool:
         return True
     return False
 
+@_locked
 def set_user_schedule(user_id: int, time_str: str, is_weekend: bool = False) -> bool:
     """設定使用者的平日或假日推播時間（格式 HH:MM）"""
     data = load_progress()
@@ -318,6 +357,7 @@ def set_user_schedule(user_id: int, time_str: str, is_weekend: bool = False) -> 
     save_progress(data)
     return True
 
+@_locked
 def set_user_schedule_mode(user_id: int, mode: str) -> str:
     """設定推播內容模式：'quest' (主線闖關), 'kana' (五十音每日循環), 'both' (兩者皆要)"""
     data = load_progress()
@@ -330,18 +370,20 @@ def set_user_schedule_mode(user_id: int, mode: str) -> str:
         save_progress(data)
     return user_info.get("schedule_mode", "both")
 
+@_locked
 def advance_kana_day(user_id: int) -> int:
-    """將使用者的五十音循環推進到下一天（1~10天循環）"""
+    """將使用者的五十音循環推進到下一天（1~KANA_DAYS 天循環，一行一站）"""
     data = load_progress()
     uid = str(user_id)
     user_info = get_user_progress(user_id)
     current = user_info.get("kana_day", 1)
-    next_day = 1 if current >= 10 else current + 1
+    next_day = 1 if current >= KANA_DAYS else current + 1
     user_info["kana_day"] = next_day
     data[uid] = user_info
     save_progress(data)
     return next_day
 
+@_locked
 def toggle_user_schedule(user_id: int) -> bool:
     """切換使用者的推播開關，回傳切換後的新狀態"""
     data = load_progress()
@@ -354,6 +396,7 @@ def toggle_user_schedule(user_id: int) -> bool:
     save_progress(data)
     return new_state
 
+@_locked
 def get_leaderboard(limit: int = 10) -> list:
     """取得所有使用者的天梯排行榜資料（依累積打卡天數與通關關卡排序）"""
     data = load_progress()
@@ -370,6 +413,7 @@ def get_leaderboard(limit: int = 10) -> list:
     leaderboard.sort(key=lambda x: (x["streak"], len(x["completed_levels"]), len(x["badges"])), reverse=True)
     return leaderboard[:limit]
 
+@_locked
 def reset_user_progress(user_id: int):
     """只重置主線闖關進度（目前關卡與已通關列表），保留打卡、勳章、錯題本與推播設定"""
     data = load_progress()
@@ -381,11 +425,13 @@ def reset_user_progress(user_id: int):
     save_progress(data)
 
 
+@_locked
 def get_last_push_date(user_id: int) -> str:
     """取得使用者上次成功收到定時推播的日期（台北時間，YYYY-MM-DD），沒有則回傳空字串"""
     return get_user_progress(user_id).get("last_push_date", "")
 
 
+@_locked
 def set_last_push_date(user_id: int, date_str: str):
     """記錄使用者成功收到定時推播的日期（推播成功後才呼叫）"""
     data = load_progress()

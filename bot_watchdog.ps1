@@ -40,6 +40,20 @@ function Write-Log {
     } catch {}
 }
 
+# Only one watchdog per user session: a second copy would start a second bot
+$WatchdogMutex = New-Object System.Threading.Mutex($false, "Local\JapaneseLearningBotWatchdog")
+$HasMutex = $false
+try {
+    $HasMutex = $WatchdogMutex.WaitOne(0)
+} catch [System.Threading.AbandonedMutexException] {
+    # Previous watchdog died without releasing it; we own it now
+    $HasMutex = $true
+}
+if (-not $HasMutex) {
+    Write-Log "Another watchdog instance is already running. This copy exits."
+    exit 0
+}
+
 Write-Log "=== Japanese Learning Bot Watchdog Started ==="
 Write-Log "Waiting $StartupDelaySec seconds for network and system..."
 Start-Sleep -Seconds $StartupDelaySec
@@ -62,16 +76,38 @@ if ($retries -ge 12) {
     Write-Log "WARNING: Network check timed out. Proceeding to launch anyway."
 }
 
-# Terminate any existing orphan bot.py processes in this folder
+# Terminate orphan copies of THIS project's bot only.
+# Match python.exe / pythonw.exe whose command line ends with "bot.py" (not discord_bot.py etc.) AND
+#   (a) whose executable lives inside this folder (the venv launcher), or
+#   (b) whose parent is such a launcher (the venv launcher spawns the real interpreter as a child), or
+#   (c) whose command line names this folder's bot.py by full path.
+function Get-ProjectBotProcesses {
+    $botCmdPattern = '(^|[\s"\\/])bot\.py"?\s*$'
+    $workPrefix = $WorkDir.TrimEnd('\') + '\'
+    $fullScript = $workPrefix + $BotScript
+    $procs = @(Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" -ErrorAction SilentlyContinue)
+    $launchers = @($procs | Where-Object {
+        $_.CommandLine -and ($_.CommandLine -match $botCmdPattern) -and (
+            ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($workPrefix, [System.StringComparison]::OrdinalIgnoreCase)) -or
+            ($_.CommandLine.IndexOf($fullScript, [System.StringComparison]::OrdinalIgnoreCase) -ge 0)
+        )
+    })
+    $launcherIds = @($launchers | ForEach-Object { $_.ProcessId })
+    $children = @($procs | Where-Object {
+        $_.CommandLine -and ($_.CommandLine -match $botCmdPattern) -and ($launcherIds -contains $_.ParentProcessId)
+    })
+    return @($launchers + $children | Where-Object { $_.ProcessId -ne $PID })
+}
+
 try {
-    $existing = Get-CimInstance Win32_Process -Filter "CommandLine LIKE '%$BotScript%'" -ErrorAction SilentlyContinue
-    foreach ($p in $existing) {
-        if ($p.CommandLine -match "Japanese_Learning") {
-            Write-Log "Stopping duplicate bot process PID: $($p.ProcessId)"
-            Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
-        }
+    foreach ($p in (Get-ProjectBotProcesses)) {
+        Write-Log "Stopping duplicate bot process PID: $($p.ProcessId) ($($p.CommandLine))"
+        # /T also stops the real interpreter that the venv launcher spawned
+        & taskkill.exe /PID $p.ProcessId /T /F 2>&1 | Out-Null
     }
-} catch {}
+} catch {
+    Write-Log "WARNING: duplicate-process check failed: $($_.Exception.Message)"
+}
 
 $restartCount = 0
 
@@ -86,10 +122,9 @@ while ($restartCount -le $MaxRestarts) {
         -PassThru `
         -NoNewWindow
 
+    # Windows PowerShell 5.1: ExitCode stays empty unless the process handle is opened right away
+    $null = $proc.Handle
     Write-Log "Bot started successfully with PID: $($proc.Id)"
-
-    # Wait 5 seconds to ensure it is alive
-    Start-Sleep -Seconds 5
 
     $proc.WaitForExit()
     $exitCode = $proc.ExitCode
@@ -103,6 +138,13 @@ while ($restartCount -le $MaxRestarts) {
         break
     }
 
+    # Exit code 3: bot.py found another running instance (bot.lock held). Wait and retry without counting.
+    if ($exitCode -eq 3) {
+        Write-Log "INFO: Another bot instance is already running. Checking again in 60 seconds."
+        Start-Sleep -Seconds 60
+        continue
+    }
+
     if ($duration.TotalSeconds -gt 60) {
         $restartCount = 0
     } else {
@@ -114,8 +156,11 @@ while ($restartCount -le $MaxRestarts) {
         break
     }
 
-    Write-Log "Restarting bot in $RestartDelaySec seconds... (Consecutive restart count: $restartCount)"
-    Start-Sleep -Seconds $RestartDelaySec
+    # Back off when the bot keeps crashing right after start (10s, 20s, 30s ... capped at 5 minutes)
+    $delay = [math]::Min($RestartDelaySec * ($restartCount + 1), 300)
+    Write-Log "Restarting bot in $delay seconds... (Consecutive restart count: $restartCount)"
+    Start-Sleep -Seconds $delay
 }
 
 Write-Log "=== Watchdog Finished ==="
+try { $WatchdogMutex.ReleaseMutex() } catch {}
